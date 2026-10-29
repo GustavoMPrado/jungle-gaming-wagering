@@ -19,7 +19,9 @@ describe('WalletLedgerEntry', () => {
       money: Money.create('25.00', 'BRL'),
       balanceBefore: Money.create('100.00', 'BRL'),
       balanceAfter: Money.create(
-        direction === LedgerDirection.Debit ? '75.00' : '125.00',
+        direction === LedgerDirection.Debit
+          ? '75.00'
+          : '125.00',
         'BRL',
       ),
     };
@@ -41,17 +43,24 @@ describe('WalletLedgerEntry', () => {
         createProps(LedgerDirection.Credit),
       );
 
+      expect(entry.direction).toBe(LedgerDirection.Credit);
       expect(entry.balanceAfter.toString()).toBe('125.00');
       expect(entry.isBalanced()).toBe(true);
     });
 
     it('should reject invalid identification', () => {
-      expect(() =>
-        WalletLedgerEntry.create({
-          ...createProps(),
-          walletId: '',
-        }),
-      ).toThrow('Invalid ledger identification');
+      for (const field of [
+        'id',
+        'walletId',
+        'transactionId',
+      ] as const) {
+        expect(() =>
+          WalletLedgerEntry.create({
+            ...createProps(),
+            [field]: '',
+          }),
+        ).toThrow('Invalid ledger identification');
+      }
     });
 
     it('should reject invalid direction', () => {
@@ -86,6 +95,13 @@ describe('WalletLedgerEntry', () => {
           money: Money.create('25.00', 'USD'),
         }),
       ).toThrow('Currency mismatch');
+
+      expect(() =>
+        WalletLedgerEntry.create({
+          ...createProps(),
+          balanceAfter: Money.create('75.00', 'USD'),
+        }),
+      ).toThrow('Currency mismatch');
     });
 
     it('should reject negative balances', () => {
@@ -93,6 +109,13 @@ describe('WalletLedgerEntry', () => {
         WalletLedgerEntry.create({
           ...createProps(),
           balanceAfter: Money.create('10.00', 'BRL').negate(),
+        }),
+      ).toThrow('Ledger balance cannot be negative');
+
+      expect(() =>
+        WalletLedgerEntry.create({
+          ...createProps(),
+          balanceBefore: Money.create('10.00', 'BRL').negate(),
         }),
       ).toThrow('Ledger balance cannot be negative');
     });
@@ -125,6 +148,15 @@ describe('WalletLedgerEntry', () => {
       expect(entry.isBalanced()).toBe(true);
       expect(entry.balanceAfter.isZero()).toBe(true);
     });
+
+    it('should reject invalid creation dates', () => {
+      expect(() =>
+        WalletLedgerEntry.create({
+          ...createProps(),
+          createdAt: new Date('invalid'),
+        }),
+      ).toThrow('Invalid ledger date');
+    });
   });
 
   describe('rehydrate', () => {
@@ -136,13 +168,40 @@ describe('WalletLedgerEntry', () => {
       expect(entry.isBalanced()).toBe(true);
     });
 
-    it('should detect inconsistent persisted arithmetic', () => {
-      const entry = WalletLedgerEntry.rehydrate({
-        ...createProps(),
-        balanceAfter: Money.create('90.00', 'BRL'),
-      });
+    it('should reject inconsistent persisted arithmetic', () => {
+      expect(() =>
+        WalletLedgerEntry.rehydrate({
+          ...createProps(),
+          balanceAfter: Money.create('90.00', 'BRL'),
+        }),
+      ).toThrow('Ledger balance mismatch');
+    });
 
-      expect(entry.isBalanced()).toBe(false);
+    it('should reject invalid persisted direction', () => {
+      expect(() =>
+        WalletLedgerEntry.rehydrate({
+          ...createProps(),
+          direction: 'INVALID' as LedgerDirection,
+        }),
+      ).toThrow('Invalid ledger direction');
+    });
+
+    it('should reject persisted currency mismatches', () => {
+      expect(() =>
+        WalletLedgerEntry.rehydrate({
+          ...createProps(),
+          money: Money.create('25.00', 'USD'),
+        }),
+      ).toThrow('Currency mismatch');
+    });
+
+    it('should reject invalid persisted dates', () => {
+      expect(() =>
+        WalletLedgerEntry.rehydrate({
+          ...createProps(),
+          createdAt: new Date('invalid'),
+        }),
+      ).toThrow('Invalid ledger date');
     });
   });
 
@@ -158,6 +217,45 @@ describe('WalletLedgerEntry', () => {
       expect(entry.createdAt).toEqual(createdAt);
     });
 
+    it('should protect the timestamp passed to create', () => {
+      const createdAt = new Date('2026-10-29T15:00:00.000Z');
+
+      const entry = WalletLedgerEntry.create({
+        ...createProps(),
+        createdAt,
+      });
+
+      createdAt.setFullYear(2030);
+
+      expect(entry.createdAt.getFullYear()).toBe(2026);
+    });
+
+    it('should protect the timestamp returned by the getter', () => {
+      const entry = WalletLedgerEntry.create({
+        ...createProps(),
+        createdAt: new Date('2026-10-29T15:00:00.000Z'),
+      });
+
+      const returnedDate = entry.createdAt;
+      returnedDate.setFullYear(2035);
+
+      expect(entry.createdAt.getFullYear()).toBe(2026);
+    });
+
+    it('should protect rehydrated timestamps', () => {
+      const createdAt = new Date('2026-10-29T15:00:00.000Z');
+
+      const entry = WalletLedgerEntry.rehydrate({
+        ...createProps(),
+        createdAt,
+      });
+
+      createdAt.setFullYear(2030);
+      entry.createdAt.setFullYear(2040);
+
+      expect(entry.createdAt.getFullYear()).toBe(2026);
+    });
+
     it('should not expose methods to change a ledger entry', () => {
       const entry = WalletLedgerEntry.create(createProps());
 
@@ -166,3 +264,4 @@ describe('WalletLedgerEntry', () => {
     });
   });
 });
+

@@ -18,6 +18,8 @@ export interface CreateWalletLedgerEntryProps {
 }
 
 export class WalletLedgerEntry {
+  private readonly _createdAt: Date;
+
   private constructor(
     public readonly id: string,
     public readonly walletId: string,
@@ -26,12 +28,94 @@ export class WalletLedgerEntry {
     public readonly money: Money,
     public readonly balanceBefore: Money,
     public readonly balanceAfter: Money,
-    public readonly createdAt: Date,
-  ) {}
+    createdAt: Date,
+  ) {
+    this._createdAt = new Date(createdAt.getTime());
+  }
 
   public static create(
     props: CreateWalletLedgerEntryProps,
   ): WalletLedgerEntry {
+    WalletLedgerEntry.validate(props);
+
+    const createdAt = props.createdAt ?? new Date();
+
+    return new WalletLedgerEntry(
+      props.id,
+      props.walletId,
+      props.transactionId,
+      props.direction,
+      props.money,
+      props.balanceBefore,
+      props.balanceAfter,
+      createdAt,
+    );
+  }
+
+  public static rehydrate(
+    props: CreateWalletLedgerEntryProps,
+  ): WalletLedgerEntry {
+    WalletLedgerEntry.validate(props);
+
+    const createdAt = props.createdAt ?? new Date();
+
+    return new WalletLedgerEntry(
+      props.id,
+      props.walletId,
+      props.transactionId,
+      props.direction,
+      props.money,
+      props.balanceBefore,
+      props.balanceAfter,
+      createdAt,
+    );
+  }
+
+  public get createdAt(): Date {
+    return new Date(this._createdAt.getTime());
+  }
+
+  public isBalanced(): boolean {
+    if (
+      this.direction !== LedgerDirection.Debit &&
+      this.direction !== LedgerDirection.Credit
+    ) {
+      return false;
+    }
+
+    if (!this.money.isPositive()) {
+      return false;
+    }
+
+    if (
+      this.money.currency !== this.balanceBefore.currency ||
+      this.money.currency !== this.balanceAfter.currency
+    ) {
+      return false;
+    }
+
+    if (
+      this.balanceBefore.isNegative() ||
+      this.balanceAfter.isNegative()
+    ) {
+      return false;
+    }
+
+    try {
+      const expectedBalance =
+        this.direction === LedgerDirection.Credit
+          ? this.balanceBefore.add(this.money)
+          : this.balanceBefore.subtract(this.money);
+
+      return expectedBalance.equals(this.balanceAfter);
+    } catch {
+      return false;
+    }
+  }
+
+  private static validate(
+    props: CreateWalletLedgerEntryProps,
+  ): void {
     if (
       !props.id?.trim() ||
       !props.walletId?.trim() ||
@@ -74,50 +158,12 @@ export class WalletLedgerEntry {
       throw new Error('Ledger balance mismatch');
     }
 
-    return new WalletLedgerEntry(
-      props.id,
-      props.walletId,
-      props.transactionId,
-      props.direction,
-      props.money,
-      props.balanceBefore,
-      props.balanceAfter,
-      new Date(props.createdAt ?? Date.now()),
-    );
-  }
-
-  public static rehydrate(
-    props: CreateWalletLedgerEntryProps,
-  ): WalletLedgerEntry {
-    return new WalletLedgerEntry(
-      props.id,
-      props.walletId,
-      props.transactionId,
-      props.direction,
-      props.money,
-      props.balanceBefore,
-      props.balanceAfter,
-      new Date(props.createdAt ?? Date.now()),
-    );
-  }
-
-  public isBalanced(): boolean {
     if (
-      this.money.currency !== this.balanceBefore.currency ||
-      this.money.currency !== this.balanceAfter.currency
+      props.createdAt !== undefined &&
+      !Number.isFinite(props.createdAt.getTime())
     ) {
-      return false;
-    }
-
-    try {
-      const expectedBalance =
-        this.direction === LedgerDirection.Credit
-          ? this.balanceBefore.add(this.money)
-          : this.balanceBefore.subtract(this.money);
-
-      return expectedBalance.equals(this.balanceAfter);
-    } catch {
-      return false;
+      throw new Error('Invalid ledger date');
     }
   }
 }
+
