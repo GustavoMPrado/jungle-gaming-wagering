@@ -107,7 +107,7 @@ export class Money {
   }
 
   public isPositive(): boolean {
-    return this.amount.isPositive();
+    return this.amount.greaterThan(0);
   }
 
   public isGreaterThan(other: Money): boolean {
