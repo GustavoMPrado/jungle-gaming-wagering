@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: jungle-gaming-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: jungle_gaming
+      POSTGRES_USER: jungle
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD não definida}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jungle -d jungle_gaming"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
