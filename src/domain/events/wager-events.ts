@@ -1,4 +1,3 @@
-
 import {
   IntegrationEvent,
   type IntegrationEventProps,
