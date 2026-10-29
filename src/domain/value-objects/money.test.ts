@@ -155,4 +155,39 @@ describe('Money', () => {
       expect(result.toString()).toBe('70.00');
     });
   });
+describe('precision limits', () => {
+  it('should accept the maximum amount', () => {
+    const money = Money.create('999999999999999999.99', 'BRL');
+
+    expect(money.toString()).toBe('999999999999999999.99');
+  });
+
+  it('should reject amounts above the limit', () => {
+    expect(() =>
+      Money.create('1000000000000000000.00', 'BRL'),
+    ).toThrow('Monetary amount exceeds maximum precision');
+  });
+
+  it('should reject addition overflow', () => {
+    const maximum = Money.create('999999999999999999.99', 'BRL');
+    const increment = Money.create('0.01', 'BRL');
+
+    expect(() => maximum.add(increment)).toThrow(
+      'Monetary amount exceeds maximum precision',
+    );
+  });
+
+  it('should reject subtraction overflow', () => {
+    const maximum = Money.create('999999999999999999.99', 'BRL');
+
+    expect(() => maximum.negate().subtract(Money.create('0.01', 'BRL')))
+      .toThrow('Monetary amount exceeds maximum precision');
+  });
+
+  it('should reject persisted values above the limit', () => {
+    expect(() =>
+      Money.rehydrate('1000000000000000000.00', 'BRL'),
+    ).toThrow('Monetary amount exceeds maximum precision');
+  });
+});
 });

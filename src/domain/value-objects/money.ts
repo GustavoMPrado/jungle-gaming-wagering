@@ -1,8 +1,8 @@
-
 import { Decimal } from 'decimal.js';
 
 export class Money {
   private static readonly SCALE = 2;
+  private static readonly MAX_AMOUNT = new Decimal('999999999999999999.99');
 
   private constructor(
     private readonly amount: Decimal,
@@ -13,30 +13,53 @@ export class Money {
     Money.validateAmount(amount);
     Money.validateCurrency(currency);
 
-    return new Money(new Decimal(amount), currency);
+    const decimal = new Decimal(amount);
+    Money.validateLimit(decimal);
+
+    return new Money(decimal, currency);
   }
 
   public static rehydrate(amount: string, currency: string): Money {
     Money.validateCurrency(currency);
 
-    const decimal = new Decimal(amount);
-
-    if (!decimal.isFinite() || decimal.decimalPlaces() > Money.SCALE) {
+    if (
+      typeof amount !== 'string' ||
+      !/^-?\d+(\.\d{1,2})?$/.test(amount)
+    ) {
       throw new Error('Invalid monetary amount');
     }
+
+    const decimal = new Decimal(amount);
+    Money.validateLimit(decimal);
 
     return new Money(decimal, currency);
   }
 
   private static validateAmount(amount: string): void {
-    if (typeof amount !== 'string' || !/^\d+(\.\d{1,2})?$/.test(amount)) {
+    if (
+      typeof amount !== 'string' ||
+      !/^\d+(\.\d{1,2})?$/.test(amount)
+    ) {
       throw new Error('Invalid monetary amount');
     }
   }
 
   private static validateCurrency(currency: string): void {
-    if (typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency)) {
+    if (
+      typeof currency !== 'string' ||
+      !/^[A-Z]{3}$/.test(currency)
+    ) {
       throw new Error('Invalid currency');
+    }
+  }
+
+  private static validateLimit(amount: Decimal): void {
+    if (!amount.isFinite()) {
+      throw new Error('Invalid monetary amount');
+    }
+
+    if (amount.abs().greaterThan(Money.MAX_AMOUNT)) {
+      throw new Error('Monetary amount exceeds maximum precision');
     }
   }
 
@@ -49,13 +72,19 @@ export class Money {
   public add(other: Money): Money {
     this.ensureSameCurrency(other);
 
-    return new Money(this.amount.plus(other.amount), this.currency);
+    const result = this.amount.plus(other.amount);
+    Money.validateLimit(result);
+
+    return new Money(result, this.currency);
   }
 
   public subtract(other: Money): Money {
     this.ensureSameCurrency(other);
 
-    return new Money(this.amount.minus(other.amount), this.currency);
+    const result = this.amount.minus(other.amount);
+    Money.validateLimit(result);
+
+    return new Money(result, this.currency);
   }
 
   public negate(): Money {
