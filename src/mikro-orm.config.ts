@@ -1,9 +1,19 @@
+
 import 'dotenv/config';
 import { defineConfig } from '@mikro-orm/postgresql';
 import { Migrator } from '@mikro-orm/migrations';
+
 import {
   WalletRecordSchema,
 } from './infrastructure/persistence/wallet-record.entity.js';
+
+import {
+  WagerTransactionRecordSchema,
+} from './infrastructure/persistence/wager-transaction-record.entity.js';
+
+import {
+  WalletLedgerEntryRecordSchema,
+} from './infrastructure/persistence/wallet-ledger-entry-record.entity.js';
 
 export default defineConfig({
   host: process.env.DB_HOST ?? 'localhost',
@@ -11,7 +21,11 @@ export default defineConfig({
   dbName: process.env.DB_NAME ?? 'jungle_gaming',
   user: process.env.DB_USER ?? 'jungle',
   password: process.env.DB_PASSWORD,
-  entities: [WalletRecordSchema],
+  entities: [
+    WalletRecordSchema,
+    WagerTransactionRecordSchema,
+    WalletLedgerEntryRecordSchema,
+  ],
   extensions: [Migrator],
   migrations: {
     path: './dist/migrations',
@@ -20,3 +34,4 @@ export default defineConfig({
     allOrNothing: true,
   },
 });
+
