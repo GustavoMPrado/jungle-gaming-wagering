@@ -1,5 +1,7 @@
+
 import type { EntityManager } from '@mikro-orm/postgresql';
 import { Money } from '../../domain/value-objects/money.js';
+import { Wallet } from '../../domain/entities/wallet.js';
 import {
   WagerTransaction,
   WagerTransactionKind,
@@ -20,6 +22,7 @@ import { WalletRepository } from '../../infrastructure/persistence/wallet.reposi
 import { WagerTransactionRepository } from '../../infrastructure/persistence/wager-transaction.repository.js';
 import { WalletLedgerEntryRepository } from '../../infrastructure/persistence/wallet-ledger-entry.repository.js';
 import { OutboxMessageRepository } from '../../infrastructure/persistence/outbox-message.repository.js';
+import { PendingReferenceRepository } from '../../infrastructure/persistence/pending-reference.repository.js';
 import { WagerTransactionRecord } from '../../infrastructure/persistence/wager-transaction-record.entity.js';
 
 export interface ProcessWagerTransactionInput {
@@ -45,6 +48,13 @@ export interface ProcessWagerTransactionResult {
   balance: string;
   failureCode?: string;
   idempotentReplay: boolean;
+}
+
+interface Repositories {
+  wallets: WalletRepository;
+  transactions: WagerTransactionRepository;
+  ledger: WalletLedgerEntryRepository;
+  outbox: OutboxMessageRepository;
 }
 
 export class ProcessWagerTransactionUseCase {
@@ -74,12 +84,11 @@ export class ProcessWagerTransactionUseCase {
     });
 
     return this.em.fork().transactional(async (em) => {
-      const wallets = new WalletRepository(em);
-      const transactions = new WagerTransactionRepository(em);
-      const ledger = new WalletLedgerEntryRepository(em);
-      const outbox = new OutboxMessageRepository(em);
+      const repos = this.repositories(em);
 
-      const wallet = await wallets.findByIdForUpdate(input.walletId);
+      const wallet = await repos.wallets.findByIdForUpdate(
+        input.walletId,
+      );
 
       if (!wallet) {
         throw new Error('Wallet not found');
@@ -107,18 +116,20 @@ export class ProcessWagerTransactionUseCase {
           throw new Error('Idempotency conflict');
         }
 
+        if (previous.resultBalance == null) {
+          throw new Error('Stored transaction result is incomplete');
+        }
+
         return {
           transactionId: previous.id,
           status: previous.status as WagerTransactionStatus,
-          balance: this.requireStoredBalance(
-            previous.resultBalance,
-          ),
+          balance: previous.resultBalance,
           failureCode: previous.failureCode ?? undefined,
           idempotentReplay: true,
         };
       }
 
-      const external = await transactions.findByExternalId(
+      const external = await repos.transactions.findByExternalId(
         input.providerId,
         input.externalTransactionId,
       );
@@ -127,162 +138,334 @@ export class ProcessWagerTransactionUseCase {
         throw new Error('External transaction identifier conflict');
       }
 
-      const before = wallet.balance;
-      let direction: LedgerDirection | undefined;
-      let reference: WagerTransaction | null = null;
-
-      if (transaction.requiresReference()) {
-        reference = await transactions.findByExternalId(
-          input.providerId,
-          input.referenceExternalTransactionId!,
-        );
-
-        if (
-          !reference ||
-          reference.status === WagerTransactionStatus.Pending ||
-          reference.status ===
-            WagerTransactionStatus.PendingReference
-        ) {
-          transaction.markPendingReference();
-
-          const nextAttempt =
-            transaction.nextReferenceAttemptAt!;
-
-          const event = new WagerTransactionPendingReference({
-            eventId: crypto.randomUUID(),
-            aggregateId: transaction.id,
-            correlationId: input.correlationId,
-            data: {
-              transactionId: transaction.id,
-              walletId: wallet.id,
-              referenceExternalTransactionId:
-                input.referenceExternalTransactionId!,
-              nextReferenceAttemptAt:
-                nextAttempt.toISOString(),
-            },
-          });
-
-          await transactions.save(transaction, wallet.balance);
-          await this.enqueueEvent(outbox, event);
-
-          return this.result(transaction, wallet.balance);
-        }
-
-        const failureCode =
-          this.validateReference(transaction, reference);
-
-        if (failureCode) {
-          transaction.markRejected(failureCode);
-        } else if (transaction.kind === WagerTransactionKind.Refund) {
-          direction = LedgerDirection.Credit;
-        } else {
-          direction = this.reverseDirection(reference.kind);
-        }
-      } else {
-        switch (transaction.kind) {
-          case WagerTransactionKind.Bet:
-            direction = LedgerDirection.Debit;
-            break;
-          case WagerTransactionKind.Win:
-            direction = LedgerDirection.Credit;
-            break;
-          case WagerTransactionKind.Loss:
-            break;
-          default:
-            throw new Error('Unsupported transaction kind');
-        }
-      }
+      const reference = transaction.requiresReference()
+        ? await repos.transactions.findByExternalId(
+            transaction.providerId,
+            transaction.referenceExternalTransactionId!,
+          )
+        : null;
 
       if (
-        !transaction.isTerminal() &&
-        direction === LedgerDirection.Debit &&
-        wallet.balance.isLessThan(money)
+        transaction.requiresReference() &&
+        this.referenceNotReady(reference)
       ) {
-        transaction.markRejected(
-          transaction.kind === WagerTransactionKind.Bet
-            ? 'INSUFFICIENT_BALANCE'
-            : 'INSUFFICIENT_REVERSAL_BALANCE',
+        transaction.markPendingReference();
+
+        await this.savePendingReference(
+          repos,
+          transaction,
+          wallet,
+          input.correlationId,
         );
-      }
-
-      if (transaction.status === WagerTransactionStatus.Rejected) {
-        const event = new WagerTransactionRejected({
-          eventId: crypto.randomUUID(),
-          aggregateId: transaction.id,
-          correlationId: input.correlationId,
-          data: {
-            transactionId: transaction.id,
-            walletId: wallet.id,
-            failureCode: transaction.failureCode!,
-          },
-        });
-
-        await transactions.save(transaction, wallet.balance);
-        await this.enqueueEvent(outbox, event);
 
         return this.result(transaction, wallet.balance);
       }
 
-      if (direction === LedgerDirection.Debit) {
-        wallet.debit(money);
-      } else if (direction === LedgerDirection.Credit) {
-        wallet.credit(money);
-      }
+      return this.applyTransaction(
+        repos,
+        wallet,
+        transaction,
+        reference,
+        input.correlationId,
+      );
+    });
+  }
 
-      transaction.markProcessed(
-        new Date(),
-        reference?.id,
+  public async resumePendingReference(
+    transactionId: string,
+    now: Date = new Date(),
+  ): Promise<ProcessWagerTransactionResult | null> {
+    if (!Number.isFinite(now.getTime())) {
+      throw new Error('Invalid reference date');
+    }
+
+    return this.em.fork().transactional(async (em) => {
+      const repos = this.repositories(em);
+      const pending = new PendingReferenceRepository(em);
+
+      const candidate = await repos.transactions.findById(
+        transactionId,
       );
 
-      await wallets.save(wallet);
-      await transactions.save(transaction, wallet.balance);
-
-      if (direction !== undefined) {
-        const entry = WalletLedgerEntry.create({
-          id: crypto.randomUUID(),
-          walletId: wallet.id,
-          transactionId: transaction.id,
-          direction,
-          money,
-          balanceBefore: before,
-          balanceAfter: wallet.balance,
-        });
-
-        await ledger.save(entry);
+      if (
+        !candidate ||
+        candidate.status !==
+          WagerTransactionStatus.PendingReference
+      ) {
+        return null;
       }
 
-      const processedEvent = new WagerTransactionProcessed({
+      // Lock the wallet before locking the transaction.
+      const wallet = await repos.wallets.findByIdForUpdate(
+        candidate.walletId,
+      );
+
+      if (!wallet) {
+        throw new Error('Wallet not found');
+      }
+
+      const locked = await pending.findByIdForUpdate(
+        transactionId,
+      );
+
+      if (!locked || !pending.isDue(locked, now)) {
+        return null;
+      }
+
+      const transaction = await repos.transactions.findById(
+        transactionId,
+      );
+
+      if (
+        !transaction ||
+        transaction.status !==
+          WagerTransactionStatus.PendingReference ||
+        !transaction.isReferenceRetryDue(now)
+      ) {
+        return null;
+      }
+
+      const reference = await repos.transactions.findByExternalId(
+        transaction.providerId,
+        transaction.referenceExternalTransactionId!,
+      );
+
+      if (this.referenceNotReady(reference)) {
+        const missing = reference === null;
+
+        transaction.recordReferenceAttempt(now);
+
+        if (!transaction.hasReferenceAttemptsRemaining()) {
+          transaction.markRejected(
+            missing
+              ? 'REFERENCE_NOT_FOUND'
+              : 'REFERENCE_NOT_READY',
+          );
+
+          await this.saveRejection(
+            repos,
+            transaction,
+            wallet,
+            transaction.id,
+          );
+        } else {
+          await this.savePendingReference(
+            repos,
+            transaction,
+            wallet,
+            transaction.id,
+          );
+        }
+
+        return this.result(transaction, wallet.balance);
+      }
+
+      return this.applyTransaction(
+        repos,
+        wallet,
+        transaction,
+        reference,
+        transaction.id,
+      );
+    });
+  }
+
+  private repositories(em: EntityManager): Repositories {
+    return {
+      wallets: new WalletRepository(em),
+      transactions: new WagerTransactionRepository(em),
+      ledger: new WalletLedgerEntryRepository(em),
+      outbox: new OutboxMessageRepository(em),
+    };
+  }
+
+  private referenceNotReady(
+    reference: WagerTransaction | null,
+  ): boolean {
+    return (
+      reference === null ||
+      reference.status === WagerTransactionStatus.Pending ||
+      reference.status === WagerTransactionStatus.PendingReference
+    );
+  }
+
+  private async applyTransaction(
+    repos: Repositories,
+    wallet: Wallet,
+    transaction: WagerTransaction,
+    reference: WagerTransaction | null,
+    correlationId: string,
+  ): Promise<ProcessWagerTransactionResult> {
+    let direction: LedgerDirection | undefined;
+
+    if (transaction.requiresReference()) {
+      if (!reference) {
+        throw new Error('Resolved reference is required');
+      }
+
+      const failureCode = this.validateReference(
+        transaction,
+        reference,
+      );
+
+      if (failureCode) {
+        transaction.markRejected(failureCode);
+      } else if (
+        transaction.kind === WagerTransactionKind.Refund
+      ) {
+        direction = LedgerDirection.Credit;
+      } else {
+        direction = this.reverseDirection(reference.kind);
+      }
+    } else {
+      switch (transaction.kind) {
+        case WagerTransactionKind.Bet:
+          direction = LedgerDirection.Debit;
+          break;
+        case WagerTransactionKind.Win:
+          direction = LedgerDirection.Credit;
+          break;
+        case WagerTransactionKind.Loss:
+          break;
+        default:
+          throw new Error('Unsupported transaction kind');
+      }
+    }
+
+    if (
+      !transaction.isTerminal() &&
+      direction === LedgerDirection.Debit &&
+      wallet.balance.isLessThan(transaction.money)
+    ) {
+      transaction.markRejected(
+        transaction.kind === WagerTransactionKind.Bet
+          ? 'INSUFFICIENT_BALANCE'
+          : 'INSUFFICIENT_REVERSAL_BALANCE',
+      );
+    }
+
+    if (transaction.status === WagerTransactionStatus.Rejected) {
+      await this.saveRejection(
+        repos,
+        transaction,
+        wallet,
+        correlationId,
+      );
+
+      return this.result(transaction, wallet.balance);
+    }
+
+    const before = wallet.balance;
+
+    if (direction === LedgerDirection.Debit) {
+      wallet.debit(transaction.money);
+    } else if (direction === LedgerDirection.Credit) {
+      wallet.credit(transaction.money);
+    }
+
+    transaction.markProcessed(
+      new Date(),
+      reference?.id,
+    );
+
+    if (direction !== undefined) {
+      await repos.wallets.save(wallet);
+    }
+
+    await repos.transactions.save(transaction, wallet.balance);
+
+    if (direction !== undefined) {
+      const entry = WalletLedgerEntry.create({
+        id: crypto.randomUUID(),
+        walletId: wallet.id,
+        transactionId: transaction.id,
+        direction,
+        money: transaction.money,
+        balanceBefore: before,
+        balanceAfter: wallet.balance,
+      });
+
+      await repos.ledger.save(entry);
+    }
+
+    const processedEvent = new WagerTransactionProcessed({
+      eventId: crypto.randomUUID(),
+      aggregateId: transaction.id,
+      correlationId,
+      data: {
+        transactionId: transaction.id,
+        walletId: wallet.id,
+        kind: transaction.kind,
+        money: transaction.money.toJSON(),
+      },
+    });
+
+    await this.enqueueEvent(repos.outbox, processedEvent);
+
+    if (direction !== undefined) {
+      const balanceEvent = new WalletBalanceChanged({
         eventId: crypto.randomUUID(),
-        aggregateId: transaction.id,
-        correlationId: input.correlationId,
+        aggregateId: wallet.id,
+        correlationId,
         data: {
           transactionId: transaction.id,
           walletId: wallet.id,
-          kind: transaction.kind,
-          money: money.toJSON(),
+          balanceBefore: before.toJSON(),
+          balanceAfter: wallet.balance.toJSON(),
         },
       });
 
-      await this.enqueueEvent(outbox, processedEvent);
+      await this.enqueueEvent(repos.outbox, balanceEvent);
+    }
 
-      if (direction !== undefined) {
-        const balanceEvent = new WalletBalanceChanged({
-          eventId: crypto.randomUUID(),
-          aggregateId: wallet.id,
-          correlationId: input.correlationId,
-          data: {
-            transactionId: transaction.id,
-            walletId: wallet.id,
-            balanceBefore: before.toJSON(),
-            balanceAfter: wallet.balance.toJSON(),
-          },
-        });
+    return this.result(transaction, wallet.balance);
+  }
 
-        await this.enqueueEvent(outbox, balanceEvent);
-      }
+  private async savePendingReference(
+    repos: Repositories,
+    transaction: WagerTransaction,
+    wallet: Wallet,
+    correlationId: string,
+  ): Promise<void> {
+    await repos.transactions.save(transaction, wallet.balance);
 
-      return this.result(transaction, wallet.balance);
+    const event = new WagerTransactionPendingReference({
+      eventId: crypto.randomUUID(),
+      aggregateId: transaction.id,
+      correlationId,
+      data: {
+        transactionId: transaction.id,
+        walletId: wallet.id,
+        referenceExternalTransactionId:
+          transaction.referenceExternalTransactionId!,
+        nextReferenceAttemptAt:
+          transaction.nextReferenceAttemptAt!.toISOString(),
+      },
     });
+
+    await this.enqueueEvent(repos.outbox, event);
+  }
+
+  private async saveRejection(
+    repos: Repositories,
+    transaction: WagerTransaction,
+    wallet: Wallet,
+    correlationId: string,
+  ): Promise<void> {
+    await repos.transactions.save(transaction, wallet.balance);
+
+    const event = new WagerTransactionRejected({
+      eventId: crypto.randomUUID(),
+      aggregateId: transaction.id,
+      correlationId,
+      data: {
+        transactionId: transaction.id,
+        walletId: wallet.id,
+        failureCode: transaction.failureCode!,
+      },
+    });
+
+    await this.enqueueEvent(repos.outbox, event);
   }
 
   private validateReference(
@@ -340,16 +523,6 @@ export class ProcessWagerTransactionUseCase {
     throw new Error('Unsupported reversal reference');
   }
 
-  private requireStoredBalance(
-    balance: string | undefined,
-  ): string {
-    if (balance === undefined || balance === null) {
-      throw new Error('Stored transaction result is incomplete');
-    }
-
-    return balance;
-  }
-
   private result(
     transaction: WagerTransaction,
     balance: Money,
@@ -384,3 +557,4 @@ export class ProcessWagerTransactionUseCase {
     );
   }
 }
+
