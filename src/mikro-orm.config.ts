@@ -1,4 +1,3 @@
-
 import 'dotenv/config';
 import { defineConfig } from '@mikro-orm/postgresql';
 import { Migrator } from '@mikro-orm/migrations';
@@ -15,6 +14,10 @@ import {
   WalletLedgerEntryRecordSchema,
 } from './infrastructure/persistence/wallet-ledger-entry-record.entity.js';
 
+import {
+  OutboxMessageRecordSchema,
+} from './infrastructure/persistence/outbox-message-record.entity.js';
+
 export default defineConfig({
   host: process.env.DB_HOST ?? 'localhost',
   port: Number(process.env.DB_PORT ?? 5433),
@@ -25,6 +28,7 @@ export default defineConfig({
     WalletRecordSchema,
     WagerTransactionRecordSchema,
     WalletLedgerEntryRecordSchema,
+    OutboxMessageRecordSchema,
   ],
   extensions: [Migrator],
   migrations: {
