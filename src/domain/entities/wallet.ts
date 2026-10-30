@@ -1,4 +1,3 @@
-
 import { Money } from '../value-objects/money.js';
 
 export interface WalletState {
