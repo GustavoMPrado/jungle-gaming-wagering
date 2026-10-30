@@ -1,22 +1,23 @@
+
 import 'dotenv/config';
 import { defineConfig } from '@mikro-orm/postgresql';
 import { Migrator } from '@mikro-orm/migrations';
 
 import {
   WalletRecordSchema,
-} from './infrastructure/persistence/wallet-record.entity.js';
+} from './infrastructure/persistence/entities/wallet-record.entity.js';
 
 import {
   WagerTransactionRecordSchema,
-} from './infrastructure/persistence/wager-transaction-record.entity.js';
+} from './infrastructure/persistence/entities/wager-transaction-record.entity.js';
 
 import {
   WalletLedgerEntryRecordSchema,
-} from './infrastructure/persistence/wallet-ledger-entry-record.entity.js';
+} from './infrastructure/persistence/entities/wallet-ledger-entry-record.entity.js';
 
 import {
   OutboxMessageRecordSchema,
-} from './infrastructure/persistence/outbox-message-record.entity.js';
+} from './infrastructure/persistence/entities/outbox-message-record.entity.js';
 
 export default defineConfig({
   host: process.env.DB_HOST ?? 'localhost',
@@ -38,4 +39,3 @@ export default defineConfig({
     allOrNothing: true,
   },
 });
-

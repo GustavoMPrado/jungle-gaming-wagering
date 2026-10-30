@@ -2,9 +2,9 @@ import {
   LockMode,
   type EntityManager,
 } from '@mikro-orm/postgresql';
-import { Wallet } from '../../domain/entities/wallet.js';
-import { Money } from '../../domain/value-objects/money.js';
-import { WalletRecord } from './wallet-record.entity.js';
+import { Wallet } from '../../../domain/entities/wallet.js';
+import { Money } from '../../../domain/value-objects/money.js';
+import { WalletRecord } from '../entities/wallet-record.entity.js';
 
 export class WalletRepository {
   public constructor(

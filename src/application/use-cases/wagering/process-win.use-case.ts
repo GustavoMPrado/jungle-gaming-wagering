@@ -1,36 +1,36 @@
 import type { EntityManager } from '@mikro-orm/postgresql';
-import { Money } from '../../domain/value-objects/money.js';
+import { Money } from '../../../domain/value-objects/money.js';
 import {
   WagerTransaction,
   WagerTransactionKind,
   WagerTransactionStatus,
-} from '../../domain/entities/wager-transaction.js';
+} from '../../../domain/entities/wager-transaction.js';
 import {
   LedgerDirection,
   WalletLedgerEntry,
-} from '../../domain/entities/wallet-ledger-entry.js';
+} from '../../../domain/entities/wallet-ledger-entry.js';
 import {
   OutboxMessage,
-} from '../../domain/entities/outbox-message.js';
+} from '../../../domain/entities/outbox-message.js';
 import {
   WagerTransactionProcessed,
   WalletBalanceChanged,
-} from '../../domain/events/wager-events.js';
+} from '../../../domain/events/wager-events.js';
 import {
   WalletRepository,
-} from '../../infrastructure/persistence/wallet.repository.js';
+} from '../../../infrastructure/persistence/repository/wallet.repository.js';
 import {
   WagerTransactionRepository,
-} from '../../infrastructure/persistence/wager-transaction.repository.js';
+} from '../../../infrastructure/persistence/repository/wager-transaction.repository.js';
 import {
   WalletLedgerEntryRepository,
-} from '../../infrastructure/persistence/wallet-ledger-entry.repository.js';
+} from '../../../infrastructure/persistence/repository/wallet-ledger-entry.repository.js';
 import {
   OutboxMessageRepository,
-} from '../../infrastructure/persistence/outbox-message.repository.js';
+} from '../../../infrastructure/persistence/repository/outbox-message.repository.js';
 import {
   WagerTransactionRecord,
-} from '../../infrastructure/persistence/wager-transaction-record.entity.js';
+} from '../../../infrastructure/persistence/entities/wager-transaction-record.entity.js';
 
 export interface ProcessWinInput {
   transactionId: string;

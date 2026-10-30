@@ -1,9 +1,9 @@
 import type { EntityManager } from '@mikro-orm/postgresql';
-import { PendingReferenceRepository } from '../../infrastructure/persistence/pending-reference.repository.js';
+import { PendingReferenceRepository } from '../../infrastructure/persistence/repository/pending-reference.repository.js';
 import {
   ProcessWagerTransactionUseCase,
   type ProcessWagerTransactionResult,
-} from '../use-cases/process-wager-transaction.use-case.js';
+} from '../use-cases/wagering/process-wager-transaction.use-case.js';
 
 export class PendingReferenceWorker {
   public constructor(

@@ -1,10 +1,10 @@
 import type { EntityManager } from '@mikro-orm/postgresql';
 import {
   OutboxMessage,
-} from '../../domain/entities/outbox-message.js';
+} from '../../../domain/entities/outbox-message.js';
 import {
   OutboxMessageRecord,
-} from './outbox-message-record.entity.js';
+} from '../entities/outbox-message-record.entity.js';
 
 export class OutboxMessageRepository {
   public constructor(

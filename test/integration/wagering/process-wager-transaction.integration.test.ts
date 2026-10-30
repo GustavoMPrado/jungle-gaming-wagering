@@ -6,20 +6,20 @@ import {
   it,
 } from 'bun:test';
 import { MikroORM } from '@mikro-orm/postgresql';
-import ormConfig from '../src/mikro-orm.config.js';
-import { Wallet } from '../src/domain/entities/wallet.js';
-import { Money } from '../src/domain/value-objects/money.js';
+import ormConfig from '../../../src/mikro-orm.config.js';
+import { Wallet } from '../../../src/domain/entities/wallet.js';
+import { Money } from '../../../src/domain/value-objects/money.js';
 import {
   WagerTransactionKind,
   WagerTransactionStatus,
-} from '../src/domain/entities/wager-transaction.js';
-import { WalletRepository } from '../src/infrastructure/persistence/wallet.repository.js';
-import { WagerTransactionRepository } from '../src/infrastructure/persistence/wager-transaction.repository.js';
-import { WalletLedgerEntryRepository } from '../src/infrastructure/persistence/wallet-ledger-entry.repository.js';
+} from '../../../src/domain/entities/wager-transaction.js';
+import { WalletRepository } from '../../../src/infrastructure/persistence/repository/wallet.repository.js';
+import { WagerTransactionRepository } from '../../../src/infrastructure/persistence/repository/wager-transaction.repository.js';
+import { WalletLedgerEntryRepository } from '../../../src/infrastructure/persistence/repository/wallet-ledger-entry.repository.js';
 import {
   ProcessWagerTransactionUseCase,
   type ProcessWagerTransactionInput,
-} from '../src/application/use-cases/process-wager-transaction.use-case.js';
+} from '../../../src/application/use-cases/wagering/process-wager-transaction.use-case.js';
 
 describe('ProcessWagerTransaction integration', () => {
   let orm: MikroORM;

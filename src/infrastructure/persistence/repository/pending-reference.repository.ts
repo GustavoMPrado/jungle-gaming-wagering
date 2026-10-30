@@ -4,7 +4,7 @@ import {
 } from '@mikro-orm/postgresql';
 import {
   WagerTransactionRecord,
-} from './wager-transaction-record.entity.js';
+} from '../entities/wager-transaction-record.entity.js';
 
 export class PendingReferenceRepository {
   public constructor(

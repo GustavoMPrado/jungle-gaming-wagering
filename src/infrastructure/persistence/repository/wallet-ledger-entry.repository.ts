@@ -2,9 +2,19 @@ import type { EntityManager } from '@mikro-orm/postgresql';
 import {
   LedgerDirection,
   WalletLedgerEntry,
-} from '../../domain/entities/wallet-ledger-entry.js';
-import { Money } from '../../domain/value-objects/money.js';
-import { WalletLedgerEntryRecord } from './wallet-ledger-entry-record.entity.js';
+} from '../../../domain/entities/wallet-ledger-entry.js';
+import { Money } from '../../../domain/value-objects/money.js';
+import { WalletLedgerEntryRecord } from '../entities/wallet-ledger-entry-record.entity.js';
+
+export interface LedgerCursor {
+  createdAt: Date;
+  id: string;
+}
+
+export interface LedgerPage {
+  entries: WalletLedgerEntry[];
+  hasMore: boolean;
+}
 
 export class WalletLedgerEntryRepository {
   public constructor(
@@ -48,6 +58,48 @@ export class WalletLedgerEntryRepository {
     );
 
     return records.map((record) => this.toDomain(record));
+  }
+
+  public async findPageByWalletId(
+    walletId: string,
+    limit: number,
+    cursor?: LedgerCursor,
+  ): Promise<LedgerPage> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new Error('Invalid ledger page limit');
+    }
+
+    const filter = cursor
+      ? {
+          walletId,
+          $or: [
+            { createdAt: { $gt: cursor.createdAt } },
+            {
+              createdAt: cursor.createdAt,
+              id: { $gt: cursor.id },
+            },
+          ],
+        }
+      : { walletId };
+
+    const records = await this.em.find(
+      WalletLedgerEntryRecord,
+      filter,
+      {
+        orderBy: {
+          createdAt: 'ASC',
+          id: 'ASC',
+        },
+        limit: limit + 1,
+      },
+    );
+
+    return {
+      entries: records
+        .slice(0, limit)
+        .map((record) => this.toDomain(record)),
+      hasMore: records.length > limit,
+    };
   }
 
   public async save(

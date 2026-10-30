@@ -3,9 +3,9 @@ import {
   WagerTransaction,
   WagerTransactionKind,
   WagerTransactionStatus,
-} from '../../domain/entities/wager-transaction.js';
-import { Money } from '../../domain/value-objects/money.js';
-import { WagerTransactionRecord } from './wager-transaction-record.entity.js';
+} from '../../../domain/entities/wager-transaction.js';
+import { Money } from '../../../domain/value-objects/money.js';
+import { WagerTransactionRecord } from '../entities/wager-transaction-record.entity.js';
 
 export class WagerTransactionRepository {
   public constructor(

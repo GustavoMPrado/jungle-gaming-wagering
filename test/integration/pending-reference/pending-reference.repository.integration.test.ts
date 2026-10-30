@@ -7,22 +7,23 @@ import {
 } from 'bun:test';
 import { MikroORM } from '@mikro-orm/postgresql';
 
-import ormConfig from '../src/mikro-orm.config.js';
-import { Money } from '../src/domain/value-objects/money.js';
-import { Wallet } from '../src/domain/entities/wallet.js';
+import ormConfig from '../../../src/mikro-orm.config.js';
+import { Money } from '../../../src/domain/value-objects/money.js';
+import { Wallet } from '../../../src/domain/entities/wallet.js';
 import {
   WagerTransactionKind,
-} from '../src/domain/entities/wager-transaction.js';
+  WagerTransactionStatus,
+} from '../../../src/domain/entities/wager-transaction.js';
 import {
   WalletRepository,
-} from '../src/infrastructure/persistence/wallet.repository.js';
+} from '../../../src/infrastructure/persistence/repository/wallet.repository.js';
 import {
   PendingReferenceRepository,
-} from '../src/infrastructure/persistence/pending-reference.repository.js';
+} from '../../../src/infrastructure/persistence/repository/pending-reference.repository.js';
 import {
   ProcessWagerTransactionUseCase,
   type ProcessWagerTransactionInput,
-} from '../src/application/use-cases/process-wager-transaction.use-case.js';
+} from '../../../src/application/use-cases/wagering/process-wager-transaction.use-case.js';
 
 describe('PendingReferenceRepository integration', () => {
   let orm: MikroORM;
@@ -72,7 +73,9 @@ describe('PendingReferenceRepository integration', () => {
 
     const result = await useCase.execute(input);
 
-    expect(result.status).toBe('PENDING_REFERENCE');
+    expect(result.status).toBe(
+      WagerTransactionStatus.PendingReference,
+    );
   });
 
   afterAll(async () => {

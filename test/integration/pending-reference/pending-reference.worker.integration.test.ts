@@ -7,21 +7,24 @@ import {
 } from 'bun:test';
 import { MikroORM } from '@mikro-orm/postgresql';
 
-import ormConfig from '../src/mikro-orm.config.js';
-import { Wallet } from '../src/domain/entities/wallet.js';
-import { Money } from '../src/domain/value-objects/money.js';
+import ormConfig from '../../../src/mikro-orm.config.js';
+import { Wallet } from '../../../src/domain/entities/wallet.js';
+import { Money } from '../../../src/domain/value-objects/money.js';
 import {
   WagerTransactionKind,
   WagerTransactionStatus,
-} from '../src/domain/entities/wager-transaction.js';
-import { WalletRepository } from '../src/infrastructure/persistence/wallet.repository.js';
-import { WagerTransactionRepository } from '../src/infrastructure/persistence/wager-transaction.repository.js';
-import { WalletLedgerEntryRepository } from '../src/infrastructure/persistence/wallet-ledger-entry.repository.js';
+} from '../../../src/domain/entities/wager-transaction.js';
+import {
+  LedgerDirection,
+} from '../../../src/domain/entities/wallet-ledger-entry.js';
+import { WalletRepository } from '../../../src/infrastructure/persistence/repository/wallet.repository.js';
+import { WagerTransactionRepository } from '../../../src/infrastructure/persistence/repository/wager-transaction.repository.js';
+import { WalletLedgerEntryRepository } from '../../../src/infrastructure/persistence/repository/wallet-ledger-entry.repository.js';
 import {
   ProcessWagerTransactionUseCase,
   type ProcessWagerTransactionInput,
-} from '../src/application/use-cases/process-wager-transaction.use-case.js';
-import { PendingReferenceWorker } from '../src/application/workers/pending-reference.worker.js';
+} from '../../../src/application/use-cases/wagering/process-wager-transaction.use-case.js';
+import { PendingReferenceWorker } from '../../../src/application/workers/pending-reference.worker.js';
 
 describe('PendingReferenceWorker integration', () => {
   let orm: MikroORM;
@@ -156,7 +159,7 @@ describe('PendingReferenceWorker integration', () => {
       orm.em.fork(),
     ).findByTransactionId(refund.transactionId);
 
-    expect(ledger?.direction).toBe('CREDIT');
+    expect(ledger?.direction).toBe(LedgerDirection.Credit);
     expect(ledger?.isBalanced()).toBe(true);
   });
 

@@ -1,4 +1,3 @@
-
 import {
   afterAll,
   beforeAll,
@@ -7,15 +6,15 @@ import {
   it,
 } from 'bun:test';
 import { MikroORM } from '@mikro-orm/postgresql';
-import ormConfig from '../src/mikro-orm.config.js';
-import { Wallet } from '../src/domain/entities/wallet.js';
-import { Money } from '../src/domain/value-objects/money.js';
+import ormConfig from '../../../src/mikro-orm.config.js';
+import { Wallet } from '../../../src/domain/entities/wallet.js';
+import { Money } from '../../../src/domain/value-objects/money.js';
 import {
   WalletRepository,
-} from '../src/infrastructure/persistence/wallet.repository.js';
+} from '../../../src/infrastructure/persistence/repository/wallet.repository.js';
 import {
   WalletRecord,
-} from '../src/infrastructure/persistence/wallet-record.entity.js';
+} from '../../../src/infrastructure/persistence/entities/wallet-record.entity.js';
 
 describe('WalletRepository integration', () => {
   let orm: MikroORM;

@@ -1,3 +1,4 @@
+
 import {
   afterAll,
   beforeAll,
@@ -7,25 +8,31 @@ import {
 } from 'bun:test';
 import { MikroORM } from '@mikro-orm/postgresql';
 
-import ormConfig from '../src/mikro-orm.config.js';
-import { Wallet } from '../src/domain/entities/wallet.js';
-import { Money } from '../src/domain/value-objects/money.js';
+import ormConfig from '../../../src/mikro-orm.config.js';
+import { Wallet } from '../../../src/domain/entities/wallet.js';
+import { Money } from '../../../src/domain/value-objects/money.js';
+import {
+  WagerTransactionStatus,
+} from '../../../src/domain/entities/wager-transaction.js';
+import {
+  LedgerDirection,
+} from '../../../src/domain/entities/wallet-ledger-entry.js';
 import {
   WalletRepository,
-} from '../src/infrastructure/persistence/wallet.repository.js';
+} from '../../../src/infrastructure/persistence/repository/wallet.repository.js';
 import {
   WagerTransactionRepository,
-} from '../src/infrastructure/persistence/wager-transaction.repository.js';
+} from '../../../src/infrastructure/persistence/repository/wager-transaction.repository.js';
 import {
   WalletLedgerEntryRepository,
-} from '../src/infrastructure/persistence/wallet-ledger-entry.repository.js';
+} from '../../../src/infrastructure/persistence/repository/wallet-ledger-entry.repository.js';
 import {
   OutboxMessageRepository,
-} from '../src/infrastructure/persistence/outbox-message.repository.js';
+} from '../../../src/infrastructure/persistence/repository/outbox-message.repository.js';
 import {
   ProcessWinUseCase,
   type ProcessWinInput,
-} from '../src/application/use-cases/process-win.use-case.js';
+} from '../../../src/application/use-cases/wagering/process-win.use-case.js';
 
 describe('ProcessWinUseCase integration', () => {
   let orm: MikroORM;
@@ -77,7 +84,7 @@ describe('ProcessWinUseCase integration', () => {
 
     const result = await useCase.execute(input);
 
-    expect(result.status).toBe('PROCESSED');
+    expect(result.status).toBe(WagerTransactionStatus.Processed);
     expect(result.balance).toBe('25.00');
     expect(result.idempotentReplay).toBe(false);
 
@@ -108,8 +115,10 @@ describe('ProcessWinUseCase integration', () => {
 
     expect(wallet?.balance.toString()).toBe('25.00');
     expect(wallet?.version).toBe(2);
-    expect(transaction?.status).toBe('PROCESSED');
-    expect(ledger?.direction).toBe('CREDIT');
+    expect(transaction?.status).toBe(
+      WagerTransactionStatus.Processed,
+    );
+    expect(ledger?.direction).toBe(LedgerDirection.Credit);
     expect(ledger?.isBalanced()).toBe(true);
     expect(processedEvent?.eventType).toBe(
       'WagerTransactionProcessed',
