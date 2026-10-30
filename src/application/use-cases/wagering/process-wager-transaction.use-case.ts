@@ -63,6 +63,7 @@ export class ProcessWagerTransactionUseCase {
 
   public async execute(
     input: ProcessWagerTransactionInput,
+    transactionalEm?: EntityManager,
   ): Promise<ProcessWagerTransactionResult> {
     const money = Money.create(input.amount, input.currency);
 
@@ -82,7 +83,9 @@ export class ProcessWagerTransactionUseCase {
         input.referenceExternalTransactionId,
     });
 
-    return this.em.fork().transactional(async (em) => {
+    const process = async (
+      em: EntityManager,
+    ): Promise<ProcessWagerTransactionResult> => {
       const repos = this.repositories(em);
 
       const wallet = await repos.wallets.findByIdForUpdate(
@@ -167,7 +170,11 @@ export class ProcessWagerTransactionUseCase {
         reference,
         input.correlationId,
       );
-    });
+    };
+
+    return transactionalEm
+      ? process(transactionalEm)
+      : this.em.fork().transactional(process);
   }
 
   public async resumePendingReference(
@@ -556,4 +563,3 @@ export class ProcessWagerTransactionUseCase {
     );
   }
 }
-

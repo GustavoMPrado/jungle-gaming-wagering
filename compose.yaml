@@ -17,5 +17,12 @@ services:
       timeout: 5s
       retries: 5
 
+  elasticmq:
+    image: softwaremill/elasticmq:latest
+    container_name: jungle-gaming-elasticmq
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9324:9324"
+
 volumes:
   postgres_data:

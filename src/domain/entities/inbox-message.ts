@@ -1,4 +1,3 @@
-
 export interface ReceiveInboxProps {
   messageId: string;
   consumerName: string;
