@@ -138,7 +138,6 @@ export class WagerController {
       'playerId',
       'roundId',
       'gameId',
-      'currency',
     ];
 
     for (const field of requiredFields) {
@@ -160,10 +159,36 @@ export class WagerController {
       throw new BadRequestException('Invalid wallet ID');
     }
 
+    let amount: unknown;
+    let currency: unknown;
+
     if (
-      typeof data.amount !== 'string' ||
-      !/^\d+(\.\d{1,2})?$/.test(data.amount) ||
-      /^0+(?:\.0{1,2})?$/.test(data.amount)
+      data.money !== null &&
+      typeof data.money === 'object' &&
+      !Array.isArray(data.money)
+    ) {
+      const money = data.money as Record<string, unknown>;
+      amount = money.amount;
+      currency = money.currency;
+    } else {
+      // Compatibilidade com o formato anterior.
+      amount = data.amount;
+      currency = data.currency;
+    }
+
+    if (
+      typeof currency !== 'string' ||
+      !currency.trim()
+    ) {
+      throw new BadRequestException(
+        'Invalid transaction currency',
+      );
+    }
+
+    if (
+      typeof amount !== 'string' ||
+      !/^\d+(\.\d{1,2})?$/.test(amount) ||
+      /^0+(?:\.0{1,2})?$/.test(amount)
     ) {
       throw new BadRequestException(
         'Invalid transaction amount',
@@ -226,8 +251,8 @@ export class WagerController {
       roundId: data.roundId as string,
       gameId: data.gameId as string,
       kind,
-      amount: data.amount,
-      currency: data.currency as string,
+      amount,
+      currency,
       referenceExternalTransactionId:
         data.referenceExternalTransactionId as
           string | undefined,

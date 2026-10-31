@@ -18,10 +18,15 @@ import { GetWalletUseCase } from '../../application/use-cases/wallet/get-wallet.
 import { GetWalletLedgerUseCase } from '../../application/use-cases/wallet/get-wallet-ledger.use-case.js';
 import { ReconcileWalletUseCase } from '../../application/use-cases/wallet/reconcile-wallet.use-case.js';
 
+interface MoneyBody {
+  amount: string;
+  currency: string;
+}
+
 interface CreateWalletBody {
   playerId: string;
-  currency: string;
-  initialBalance: string;
+  initialBalance: MoneyBody | string;
+  currency?: string;
 }
 
 @Controller('wallets')
@@ -35,17 +40,37 @@ export class WalletController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  public async create(
-    @Body() body: CreateWalletBody,
-  ) {
+  public async create(@Body() body: CreateWalletBody) {
     if (
       !body ||
       typeof body.playerId !== 'string' ||
-      !body.playerId.trim() ||
-      typeof body.currency !== 'string' ||
-      !body.currency.trim() ||
-      typeof body.initialBalance !== 'string' ||
-      !/^\d+(\.\d{1,2})?$/.test(body.initialBalance)
+      !body.playerId.trim()
+    ) {
+      throw new BadRequestException('Invalid wallet request');
+    }
+
+    let amount: string;
+    let currency: string;
+
+    if (typeof body.initialBalance === 'string') {
+      // Compatibilidade com o formato anterior.
+      amount = body.initialBalance;
+      currency = body.currency ?? '';
+    } else if (
+      body.initialBalance &&
+      typeof body.initialBalance.amount === 'string' &&
+      typeof body.initialBalance.currency === 'string'
+    ) {
+      // Formato exigido pelo enunciado.
+      amount = body.initialBalance.amount;
+      currency = body.initialBalance.currency;
+    } else {
+      throw new BadRequestException('Invalid wallet request');
+    }
+
+    if (
+      !currency.trim() ||
+      !/^\d+(\.\d{1,2})?$/.test(amount)
     ) {
       throw new BadRequestException('Invalid wallet request');
     }
@@ -53,8 +78,8 @@ export class WalletController {
     try {
       return await this.createWallet.execute({
         playerId: body.playerId,
-        currency: body.currency,
-        initialBalance: body.initialBalance,
+        currency,
+        initialBalance: amount,
       });
     } catch (error) {
       if (
@@ -64,17 +89,13 @@ export class WalletController {
         throw new ConflictException('Wallet already exists');
       }
 
-      throw new ServiceUnavailableException(
-        'Unable to create wallet',
-      );
+      throw new ServiceUnavailableException('Unable to create wallet');
     }
   }
 
   @Post(':walletId/reconciliation')
   @HttpCode(HttpStatus.OK)
-  public async reconcile(
-    @Param('walletId') walletId: string,
-  ) {
+  public async reconcile(@Param('walletId') walletId: string) {
     this.validateWalletId(walletId);
 
     const result = await this.reconcileWallet.execute(walletId);
@@ -141,9 +162,7 @@ export class WalletController {
   }
 
   @Get(':walletId')
-  public async findById(
-    @Param('walletId') walletId: string,
-  ) {
+  public async findById(@Param('walletId') walletId: string) {
     this.validateWalletId(walletId);
 
     const wallet = await this.getWallet.execute(walletId);
@@ -165,4 +184,3 @@ export class WalletController {
     }
   }
 }
-

@@ -8,9 +8,34 @@ export class GetWagerTransactionUseCase {
   ) {}
 
   public async execute(transactionId: string) {
-    const repository = new WagerTransactionRepository(this.em);
+    const repository = new WagerTransactionRepository(
+      this.em.fork(),
+    );
 
     const transaction = await repository.findById(transactionId);
+
+    if (!transaction) {
+      return null;
+    }
+
+    return {
+      transactionId: transaction.id,
+      status: transaction.status,
+    };
+  }
+
+  public async findByExternalId(
+    providerId: string,
+    externalTransactionId: string,
+  ) {
+    const repository = new WagerTransactionRepository(
+      this.em.fork(),
+    );
+
+    const transaction = await repository.findByExternalId(
+      providerId,
+      externalTransactionId,
+    );
 
     if (!transaction) {
       return null;

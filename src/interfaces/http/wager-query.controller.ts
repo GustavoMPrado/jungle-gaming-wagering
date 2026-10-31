@@ -8,13 +8,13 @@ import {
 
 import { GetWagerTransactionUseCase } from '../../application/use-cases/wagering/get-wager-transaction.use-case.js';
 
-@Controller('wagering/transactions')
+@Controller()
 export class WagerQueryController {
   public constructor(
     private readonly getWagerTransaction: GetWagerTransactionUseCase,
   ) {}
 
-  @Get(':transactionId')
+  @Get('wagering/transactions/:transactionId')
   public async findById(
     @Param('transactionId') transactionId: string,
   ) {
@@ -27,6 +27,30 @@ export class WagerQueryController {
 
     const transaction =
       await this.getWagerTransaction.execute(transactionId);
+
+    if (!transaction) {
+      throw new NotFoundException('Transaction not found');
+    }
+
+    return transaction;
+  }
+
+  @Get('providers/:providerId/wagering/transactions/:externalTransactionId')
+  public async findByExternalId(
+    @Param('providerId') providerId: string,
+    @Param('externalTransactionId') externalTransactionId: string,
+  ) {
+    if (!providerId.trim() || !externalTransactionId.trim()) {
+      throw new BadRequestException(
+        'Provider ID and external transaction ID are required',
+      );
+    }
+
+    const transaction =
+      await this.getWagerTransaction.findByExternalId(
+        providerId,
+        externalTransactionId,
+      );
 
     if (!transaction) {
       throw new NotFoundException('Transaction not found');

@@ -47,7 +47,7 @@ describe('Wallet reconciliation endpoint', () => {
   });
 
   it('reports a financial mismatch without correcting it', async () => {
-    const log = mock(() => {});
+    const log = mock((_message: string) => {});
     const originalError = console.error;
     console.error = log;
 
