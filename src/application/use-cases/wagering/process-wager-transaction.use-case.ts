@@ -201,7 +201,6 @@ export class ProcessWagerTransactionUseCase {
         return null;
       }
 
-      // Lock the wallet before locking the transaction.
       const wallet = await repos.wallets.findByIdForUpdate(
         candidate.walletId,
       );

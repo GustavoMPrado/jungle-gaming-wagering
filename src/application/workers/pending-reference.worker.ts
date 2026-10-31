@@ -29,7 +29,6 @@ export class PendingReferenceWorker {
         now,
       );
 
-      // Another worker may have already processed this transaction.
       if (result !== null) {
         results.push(result);
       }

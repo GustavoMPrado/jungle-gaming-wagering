@@ -53,7 +53,6 @@ export class WalletController {
     let currency: string;
 
     if (typeof body.initialBalance === 'string') {
-      // Compatibilidade com o formato anterior.
       amount = body.initialBalance;
       currency = body.currency ?? '';
     } else if (
@@ -61,7 +60,6 @@ export class WalletController {
       typeof body.initialBalance.amount === 'string' &&
       typeof body.initialBalance.currency === 'string'
     ) {
-      // Formato exigido pelo enunciado.
       amount = body.initialBalance.amount;
       currency = body.initialBalance.currency;
     } else {

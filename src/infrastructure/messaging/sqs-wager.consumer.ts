@@ -178,7 +178,6 @@ export class SqsWagerConsumer implements OnModuleInit, OnModuleDestroy {
         duplicate: result.duplicate,
       });
 
-      // A transação PostgreSQL já foi confirmada.
       await this.acknowledge(message);
 
       this.log('message_acknowledged', {
@@ -206,8 +205,6 @@ export class SqsWagerConsumer implements OnModuleInit, OnModuleDestroy {
         await this.scheduleRetry(message, receiveCount);
       }
 
-      // Não executar DeleteMessage em caso de falha.
-      // O redrive do SQS encaminhará à DLQ após o limite.
     }
   }
 

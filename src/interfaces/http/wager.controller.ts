@@ -171,7 +171,6 @@ export class WagerController {
       amount = money.amount;
       currency = money.currency;
     } else {
-      // Compatibilidade com o formato anterior.
       amount = data.amount;
       currency = data.currency;
     }

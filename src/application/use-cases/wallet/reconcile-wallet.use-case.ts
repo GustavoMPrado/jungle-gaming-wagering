@@ -38,8 +38,6 @@ export class ReconcileWalletUseCase {
     walletId: string,
   ): Promise<ReconciliationResult | null> {
     return this.em.fork().transactional(async (em) => {
-      // Garante que carteira e ledger sejam lidos
-      // a partir do mesmo snapshot do PostgreSQL.
       await em.execute(
         'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ',
       );
