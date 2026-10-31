@@ -22,6 +22,7 @@
     "test:e2e": "bun test ./test/app.e2e.test.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-sqs": "^3.1161.0",
     "@mikro-orm/core": "^7.2.5",
     "@mikro-orm/migrations": "^7.2.5",
     "@mikro-orm/nestjs": "^7.1.0",

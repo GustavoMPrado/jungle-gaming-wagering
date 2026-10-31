@@ -158,4 +158,194 @@ describe('InboxMessageRepository integration', () => {
     expect(firstStored?.consumerName).toBe('wagering-consumer');
     expect(secondStored?.consumerName).toBe('audit-consumer');
   });
+
+  it('should claim a new message inside a transaction', async () => {
+    const messageId = crypto.randomUUID();
+    const consumerName = 'wagering-consumer';
+
+    const message = InboxMessage.receive({
+      messageId,
+      consumerName,
+      payloadHash: 'hash-new-claim',
+    });
+
+    await orm.em.fork().transactional(async (em) => {
+      const repository = new InboxMessageRepository(em);
+
+      const claimed = await repository.claim(message);
+
+      expect(claimed.messageId).toBe(messageId);
+      expect(claimed.payloadHash).toBe('hash-new-claim');
+      expect(claimed.isProcessed()).toBe(false);
+
+      claimed.markProcessed();
+      await repository.save(claimed);
+    });
+
+    const stored = await new InboxMessageRepository(
+      orm.em.fork(),
+    ).findById(consumerName, messageId);
+
+    expect(stored?.isProcessed()).toBe(true);
+  });
+
+  it('should recognize an already processed duplicate', async () => {
+    const messageId = crypto.randomUUID();
+    const consumerName = 'wagering-consumer';
+
+    const message = InboxMessage.receive({
+      messageId,
+      consumerName,
+      payloadHash: 'hash-duplicate',
+    });
+
+    await orm.em.fork().transactional(async (em) => {
+      const repository = new InboxMessageRepository(em);
+
+      const claimed = await repository.claim(message);
+
+      claimed.markProcessed();
+      await repository.save(claimed);
+    });
+
+    const duplicate = InboxMessage.receive({
+      messageId,
+      consumerName,
+      payloadHash: 'hash-duplicate',
+    });
+
+    await orm.em.fork().transactional(async (em) => {
+      const repository = new InboxMessageRepository(em);
+
+      const claimed = await repository.claim(duplicate);
+
+      expect(claimed.isProcessed()).toBe(true);
+      expect(claimed.payloadHash).toBe('hash-duplicate');
+    });
+
+    const records = await orm.em.fork().getConnection().execute<
+      { count: string }[]
+    >(
+      `select count(*) as count
+       from inbox_messages
+       where consumer_name = ?
+         and message_id = ?`,
+      [consumerName, messageId],
+    );
+
+    expect(Number(records[0]?.count)).toBe(1);
+  });
+
+  it('should reject a duplicate message with a different payload', async () => {
+    const messageId = crypto.randomUUID();
+    const consumerName = 'wagering-consumer';
+
+    const original = InboxMessage.receive({
+      messageId,
+      consumerName,
+      payloadHash: 'hash-original',
+    });
+
+    await orm.em.fork().transactional(async (em) => {
+      const repository = new InboxMessageRepository(em);
+
+      const claimed = await repository.claim(original);
+
+      claimed.markProcessed();
+      await repository.save(claimed);
+    });
+
+    const conflicting = InboxMessage.receive({
+      messageId,
+      consumerName,
+      payloadHash: 'hash-different',
+    });
+
+    await expect(
+      orm.em.fork().transactional(async (em) => {
+        const repository = new InboxMessageRepository(em);
+
+        await repository.claim(conflicting);
+      }),
+    ).rejects.toThrow('Inbox message payload conflict');
+
+    const stored = await new InboxMessageRepository(
+      orm.em.fork(),
+    ).findById(consumerName, messageId);
+
+    expect(stored?.payloadHash).toBe('hash-original');
+    expect(stored?.isProcessed()).toBe(true);
+  });
+
+  it('should serialize concurrent claims for the same message', async () => {
+    const messageId = crypto.randomUUID();
+    const consumerName = 'wagering-consumer';
+
+    const message = InboxMessage.receive({
+      messageId,
+      consumerName,
+      payloadHash: 'hash-concurrent',
+    });
+
+    let releaseFirst!: () => void;
+    let firstClaimed!: () => void;
+
+    const firstHasClaimed = new Promise<void>((resolve) => {
+      firstClaimed = resolve;
+    });
+
+    const releaseFirstTransaction = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const firstTransaction = orm.em.fork().transactional(async (em) => {
+      const repository = new InboxMessageRepository(em);
+      const claimed = await repository.claim(message);
+
+      firstClaimed();
+      await releaseFirstTransaction;
+
+      claimed.markProcessed();
+      await repository.save(claimed);
+
+      return claimed.isProcessed();
+    });
+
+    await firstHasClaimed;
+
+    const secondTransaction = orm.em.fork().transactional(async (em) => {
+      const repository = new InboxMessageRepository(em);
+      const claimed = await repository.claim(message);
+
+      return claimed.isProcessed();
+    });
+
+    releaseFirst();
+
+    const [firstProcessed, secondSawProcessed] = await Promise.all([
+      firstTransaction,
+      secondTransaction,
+    ]);
+
+    expect(firstProcessed).toBe(true);
+    expect(secondSawProcessed).toBe(true);
+
+    const stored = await new InboxMessageRepository(
+      orm.em.fork(),
+    ).findById(consumerName, messageId);
+
+    expect(stored?.isProcessed()).toBe(true);
+
+    const records = await orm.em.fork().getConnection().execute<
+      { count: string }[]
+    >(
+      `select count(*) as count
+       from inbox_messages
+       where consumer_name = ?
+         and message_id = ?`,
+      [consumerName, messageId],
+    );
+
+    expect(Number(records[0]?.count)).toBe(1);
+  });
 });

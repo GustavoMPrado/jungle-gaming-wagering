@@ -17,12 +17,16 @@ services:
       timeout: 5s
       retries: 5
 
-  elasticmq:
-    image: softwaremill/elasticmq:latest
-    container_name: jungle-gaming-elasticmq
+  ministack:
+    image: ministackorg/ministack:latest
+    container_name: jungle-gaming-ministack
     restart: unless-stopped
     ports:
-      - "127.0.0.1:9324:9324"
+      - "127.0.0.1:4566:4566"
+    environment:
+      GATEWAY_PORT: "4566"
+      MINISTACK_REGION: us-east-1
+      MINISTACK_HOST: localhost
 
 volumes:
   postgres_data:

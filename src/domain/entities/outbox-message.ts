@@ -1,4 +1,3 @@
-
 export interface EnqueueOutboxMessageProps {
   id: string;
   aggregateId: string;
