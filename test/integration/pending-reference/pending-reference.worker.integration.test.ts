@@ -24,7 +24,6 @@ import {
   ProcessWagerTransactionUseCase,
   type ProcessWagerTransactionInput,
 } from '../../../src/application/use-cases/wagering/process-wager-transaction.use-case.js';
-import { PendingReferenceWorker } from '../../../src/application/workers/pending-reference.worker.js';
 
 describe('PendingReferenceWorker integration', () => {
   let orm: MikroORM;
@@ -330,5 +329,160 @@ describe('PendingReferenceWorker integration', () => {
     );
 
     expect(repeated).toBeNull();
+  });
+
+  it('should process ROLLBACK after its WIN arrives', async () => {
+    const { walletId, playerId } = await createWallet();
+    const useCase = new ProcessWagerTransactionUseCase(orm.em);
+
+    const winExternalId = crypto.randomUUID();
+
+    const rollback = {
+      ...createInput(
+        walletId,
+        playerId,
+        WagerTransactionKind.Rollback,
+        '50.00',
+      ),
+      referenceExternalTransactionId: winExternalId,
+    };
+
+    const pending = await useCase.execute(rollback);
+
+    expect(pending.status).toBe(
+      WagerTransactionStatus.PendingReference,
+    );
+
+    const win = createInput(
+      walletId,
+      playerId,
+      WagerTransactionKind.Win,
+      '50.00',
+      winExternalId,
+    );
+
+    const winResult = await useCase.execute(win);
+
+    expect(winResult.status).toBe(
+      WagerTransactionStatus.Processed,
+    );
+    expect(winResult.balance).toBe('50.00');
+
+    const stored = await getTransaction(rollback.transactionId);
+
+    const result = await useCase.resumePendingReference(
+      rollback.transactionId,
+      stored!.nextReferenceAttemptAt!,
+    );
+
+    expect(result?.status).toBe(
+      WagerTransactionStatus.Processed,
+    );
+    expect(result?.balance).toBe('0.00');
+
+    const wallet = await new WalletRepository(
+      orm.em.fork(),
+    ).findById(walletId);
+
+    const ledger = await new WalletLedgerEntryRepository(
+      orm.em.fork(),
+    ).findByTransactionId(rollback.transactionId);
+
+    expect(wallet?.balance.toString()).toBe('0.00');
+    expect(ledger?.direction).toBe(LedgerDirection.Debit);
+    expect(ledger?.isBalanced()).toBe(true);
+
+    const processedRollback = await getTransaction(
+      rollback.transactionId,
+    );
+
+    expect(processedRollback?.referenceTransactionId).toBe(
+      win.transactionId,
+    );
+  });
+
+  it('should resolve a pending REFUND only once with concurrent workers', async () => {
+    const { walletId, playerId } = await createWallet();
+    const useCase = new ProcessWagerTransactionUseCase(orm.em);
+
+    await useCase.execute(
+      createInput(
+        walletId,
+        playerId,
+        WagerTransactionKind.Win,
+        '100.00',
+      ),
+    );
+
+    const betExternalId = crypto.randomUUID();
+
+    const refund = {
+      ...createInput(
+        walletId,
+        playerId,
+        WagerTransactionKind.Refund,
+        '30.00',
+      ),
+      referenceExternalTransactionId: betExternalId,
+    };
+
+    const pending = await useCase.execute(refund);
+
+    expect(pending.status).toBe(
+      WagerTransactionStatus.PendingReference,
+    );
+
+    const bet = createInput(
+      walletId,
+      playerId,
+      WagerTransactionKind.Bet,
+      '30.00',
+      betExternalId,
+    );
+
+    await useCase.execute(bet);
+
+    const stored = await getTransaction(refund.transactionId);
+    const due = stored!.nextReferenceAttemptAt!;
+
+    const worker1 = new ProcessWagerTransactionUseCase(orm.em);
+    const worker2 = new ProcessWagerTransactionUseCase(orm.em);
+
+    const results = await Promise.all([
+      worker1.resumePendingReference(refund.transactionId, due),
+      worker2.resumePendingReference(refund.transactionId, due),
+    ]);
+
+    const processed = results.filter(
+      (result) =>
+        result?.status === WagerTransactionStatus.Processed,
+    );
+
+    expect(processed.length).toBe(1);
+
+    const wallet = await new WalletRepository(
+      orm.em.fork(),
+    ).findById(walletId);
+
+    const entries = await new WalletLedgerEntryRepository(
+      orm.em.fork(),
+    ).findByWalletId(walletId);
+
+    expect(wallet?.balance.toString()).toBe('100.00');
+    expect(entries.length).toBe(3);
+
+    const refundEntries = entries.filter(
+      (entry) => entry.transactionId === refund.transactionId,
+    );
+
+    expect(refundEntries.length).toBe(1);
+
+    const finalRefund = await getTransaction(
+      refund.transactionId,
+    );
+
+    expect(finalRefund?.status).toBe(
+      WagerTransactionStatus.Processed,
+    );
   });
 });
