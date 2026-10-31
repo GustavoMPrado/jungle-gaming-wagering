@@ -22,6 +22,8 @@ import { WalletController } from './interfaces/http/wallet.controller.js';
 import { WagerController } from './interfaces/http/wager.controller.js';
 import { WagerQueryController } from './interfaces/http/wager-query.controller.js';
 
+import { HealthController } from './interfaces/http/health.controller.js';
+
 @Module({
   imports: [
     MikroOrmModule.forRoot(mikroOrmConfig),
@@ -30,6 +32,7 @@ import { WagerQueryController } from './interfaces/http/wager-query.controller.j
     WalletController,
     WagerController,
     WagerQueryController,
+    HealthController,
   ],
   providers: [
     {
