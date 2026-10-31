@@ -16,6 +16,7 @@ import {
 import { CreateWalletUseCase } from '../../application/use-cases/wallet/create-wallet.use-case.js';
 import { GetWalletUseCase } from '../../application/use-cases/wallet/get-wallet.use-case.js';
 import { GetWalletLedgerUseCase } from '../../application/use-cases/wallet/get-wallet-ledger.use-case.js';
+import { ReconcileWalletUseCase } from '../../application/use-cases/wallet/reconcile-wallet.use-case.js';
 
 interface CreateWalletBody {
   playerId: string;
@@ -29,6 +30,7 @@ export class WalletController {
     private readonly createWallet: CreateWalletUseCase,
     private readonly getWallet: GetWalletUseCase,
     private readonly getWalletLedger: GetWalletLedgerUseCase,
+    private readonly reconcileWallet: ReconcileWalletUseCase,
   ) {}
 
   @Post()
@@ -66,6 +68,30 @@ export class WalletController {
         'Unable to create wallet',
       );
     }
+  }
+
+  @Post(':walletId/reconciliation')
+  @HttpCode(HttpStatus.OK)
+  public async reconcile(
+    @Param('walletId') walletId: string,
+  ) {
+    this.validateWalletId(walletId);
+
+    const result = await this.reconcileWallet.execute(walletId);
+
+    if (!result) {
+      throw new NotFoundException('Wallet not found');
+    }
+
+    if (!result.consistent) {
+      console.error(JSON.stringify({
+        event: 'wallet_reconciliation_mismatch',
+        walletId: result.walletId,
+        checkedEntries: result.checkedEntries,
+      }));
+    }
+
+    return result;
   }
 
   @Get(':walletId/ledger')
@@ -139,3 +165,4 @@ export class WalletController {
     }
   }
 }
+
