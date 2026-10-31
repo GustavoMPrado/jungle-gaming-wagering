@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { MikroOrmModule } from '@mikro-orm/nestjs';
 import { MikroORM } from '@mikro-orm/postgresql';
 import { SQSClient } from '@aws-sdk/client-sqs';
@@ -15,14 +16,28 @@ import { ProcessWagerTransactionUseCase } from './application/use-cases/wagering
 import { PendingReferenceWorker } from './application/workers/pending-reference.worker.js';
 import { PendingReferenceScheduler } from './application/workers/pending-reference.scheduler.js';
 
+import { ProviderAuthGuard } from './infrastructure/auth/provider-auth.guard.js';
 import { SqsWagerConsumer } from './infrastructure/messaging/sqs-wager.consumer.js';
 import { SqsOutboxPublisher } from './infrastructure/messaging/sqs-outbox.publisher.js';
+import { MetricsService } from './infrastructure/observability/metrics.service.js';
 
 import { WalletController } from './interfaces/http/wallet.controller.js';
 import { WagerController } from './interfaces/http/wager.controller.js';
 import { WagerQueryController } from './interfaces/http/wager-query.controller.js';
-
 import { HealthController } from './interfaces/http/health.controller.js';
+import { HttpLoggingInterceptor } from './interfaces/http/http-logging.interceptor.js';
+import { MetricsController } from './interfaces/http/metrics.controller.js';
+
+function createSqsClient(): SQSClient {
+  return new SQSClient({
+    region: process.env.AWS_REGION ?? 'us-east-1',
+    endpoint: process.env.SQS_ENDPOINT ?? 'http://localhost:4566',
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? 'test',
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? 'test',
+    },
+  });
+}
 
 @Module({
   imports: [
@@ -33,31 +48,50 @@ import { HealthController } from './interfaces/http/health.controller.js';
     WagerController,
     WagerQueryController,
     HealthController,
+    MetricsController,
   ],
   providers: [
+    MetricsService,
+    {
+      provide: APP_GUARD,
+      useClass: ProviderAuthGuard,
+    },
+    {
+      provide: 'METRICS_SQS_CLIENT',
+      useFactory: createSqsClient,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: HttpLoggingInterceptor,
+    },
     {
       provide: CreateWalletUseCase,
-      useFactory: (orm: MikroORM) => new CreateWalletUseCase(orm.em),
+      useFactory: (orm: MikroORM) =>
+        new CreateWalletUseCase(orm.em),
       inject: [MikroORM],
     },
     {
       provide: GetWalletUseCase,
-      useFactory: (orm: MikroORM) => new GetWalletUseCase(orm.em),
+      useFactory: (orm: MikroORM) =>
+        new GetWalletUseCase(orm.em),
       inject: [MikroORM],
     },
     {
       provide: GetWalletLedgerUseCase,
-      useFactory: (orm: MikroORM) => new GetWalletLedgerUseCase(orm.em),
+      useFactory: (orm: MikroORM) =>
+        new GetWalletLedgerUseCase(orm.em),
       inject: [MikroORM],
     },
     {
       provide: ReconcileWalletUseCase,
-      useFactory: (orm: MikroORM) => new ReconcileWalletUseCase(orm.em),
+      useFactory: (orm: MikroORM) =>
+        new ReconcileWalletUseCase(orm.em),
       inject: [MikroORM],
     },
     {
       provide: GetWagerTransactionUseCase,
-      useFactory: (orm: MikroORM) => new GetWagerTransactionUseCase(orm.em),
+      useFactory: (orm: MikroORM) =>
+        new GetWagerTransactionUseCase(orm.em),
       inject: [MikroORM],
     },
     {
@@ -80,59 +114,46 @@ import { HealthController } from './interfaces/http/health.controller.js';
     },
     {
       provide: SqsWagerConsumer,
-      useFactory: (orm: MikroORM) => {
-        const endpoint =
-          process.env.SQS_ENDPOINT ?? 'http://localhost:4566';
-
-        const region =
-          process.env.AWS_REGION ?? 'us-east-1';
-
-        const sqs = new SQSClient({
-          region,
-          endpoint,
-          credentials: {
-            accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? 'test',
-            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? 'test',
-          },
-        });
+      useFactory: (
+        orm: MikroORM,
+        metrics: MetricsService,
+      ) => {
+        const sqs = createSqsClient();
 
         const queueUrl =
           process.env.SQS_QUEUE_URL ??
           'http://localhost:4566/000000000000/wager-transactions.fifo';
 
-        return new SqsWagerConsumer(orm, sqs, queueUrl);
+        return new SqsWagerConsumer(
+          orm,
+          sqs,
+          queueUrl,
+          metrics,
+        );
       },
-      inject: [MikroORM],
+      inject: [MikroORM, MetricsService],
     },
     {
       provide: SqsOutboxPublisher,
-      useFactory: (orm: MikroORM) => {
-        const endpoint =
-          process.env.SQS_ENDPOINT ?? 'http://localhost:4566';
-
-        const region =
-          process.env.AWS_REGION ?? 'us-east-1';
-
-        const sqs = new SQSClient({
-          region,
-          endpoint,
-          credentials: {
-            accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? 'test',
-            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? 'test',
-          },
-        });
+      useFactory: (
+        orm: MikroORM,
+        metrics: MetricsService,
+      ) => {
+        const sqs = createSqsClient();
 
         const queueUrl =
           process.env.SQS_EVENTS_QUEUE_URL ??
           'http://localhost:4566/000000000000/wager-events.fifo';
 
-        return new SqsOutboxPublisher(orm, sqs, queueUrl);
+        return new SqsOutboxPublisher(
+          orm,
+          sqs,
+          queueUrl,
+          metrics,
+        );
       },
-      inject: [MikroORM],
+      inject: [MikroORM, MetricsService],
     },
   ],
 })
 export class AppModule {}
-
-
-

@@ -4,6 +4,8 @@ import {
   type MoneyProps,
 } from './integration-event.js';
 
+import { LedgerDirection } from '../entities/wallet-ledger-entry.js';
+
 export interface WagerTransactionProcessedData {
   transactionId: string;
   walletId: string;
@@ -20,8 +22,11 @@ export interface WagerTransactionRejectedData {
 export interface WalletBalanceChangedData {
   transactionId: string;
   walletId: string;
+  direction: LedgerDirection;
+  money: MoneyProps;
   balanceBefore: MoneyProps;
   balanceAfter: MoneyProps;
+  walletVersion: number;
 }
 
 export interface WagerTransactionPendingReferenceData {

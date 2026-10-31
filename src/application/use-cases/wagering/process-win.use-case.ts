@@ -9,28 +9,16 @@ import {
   LedgerDirection,
   WalletLedgerEntry,
 } from '../../../domain/entities/wallet-ledger-entry.js';
-import {
-  OutboxMessage,
-} from '../../../domain/entities/outbox-message.js';
+import { OutboxMessage } from '../../../domain/entities/outbox-message.js';
 import {
   WagerTransactionProcessed,
   WalletBalanceChanged,
 } from '../../../domain/events/wager-events.js';
-import {
-  WalletRepository,
-} from '../../../infrastructure/persistence/repository/wallet.repository.js';
-import {
-  WagerTransactionRepository,
-} from '../../../infrastructure/persistence/repository/wager-transaction.repository.js';
-import {
-  WalletLedgerEntryRepository,
-} from '../../../infrastructure/persistence/repository/wallet-ledger-entry.repository.js';
-import {
-  OutboxMessageRepository,
-} from '../../../infrastructure/persistence/repository/outbox-message.repository.js';
-import {
-  WagerTransactionRecord,
-} from '../../../infrastructure/persistence/entities/wager-transaction-record.entity.js';
+import { WalletRepository } from '../../../infrastructure/persistence/repository/wallet.repository.js';
+import { WagerTransactionRepository } from '../../../infrastructure/persistence/repository/wager-transaction.repository.js';
+import { WalletLedgerEntryRepository } from '../../../infrastructure/persistence/repository/wallet-ledger-entry.repository.js';
+import { OutboxMessageRepository } from '../../../infrastructure/persistence/repository/outbox-message.repository.js';
+import { WagerTransactionRecord } from '../../../infrastructure/persistence/entities/wager-transaction-record.entity.js';
 
 export interface ProcessWinInput {
   transactionId: string;
@@ -183,8 +171,11 @@ export class ProcessWinUseCase {
         data: {
           transactionId: transaction.id,
           walletId: wallet.id,
+          direction: LedgerDirection.Credit,
+          money: amount.toJSON(),
           balanceBefore: balanceBefore.toJSON(),
           balanceAfter: wallet.balance.toJSON(),
+          walletVersion: wallet.version,
         },
       });
 

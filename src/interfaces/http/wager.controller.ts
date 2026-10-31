@@ -26,11 +26,13 @@ import {
   createWagerPayloadHash,
   type WagerPayload,
 } from '../../application/utils/wager-payload-hash.js';
+import { MetricsService } from '../../infrastructure/observability/metrics.service.js';
 
 @Controller('wagering/transactions')
 export class WagerController {
   public constructor(
     private readonly processWager: ProcessWagerTransactionUseCase,
+    private readonly metrics: MetricsService,
   ) {}
 
   @Post()
@@ -51,7 +53,16 @@ export class WagerController {
     }
 
     const payload = this.validateBody(body);
-    const payloadHash = createWagerPayloadHash(payload);
+
+    let payloadHash: string;
+
+    try {
+      payloadHash = createWagerPayloadHash(payload);
+    } catch {
+      throw new BadRequestException('Invalid transaction money');
+    }
+
+    const startedAt = performance.now();
 
     try {
       const result = await this.processWager.execute({
@@ -66,6 +77,32 @@ export class WagerController {
             : randomUUID(),
       });
 
+      this.metrics.observeDuration(
+        'wager_processing_duration_ms',
+        performance.now() - startedAt,
+      );
+
+      if (result.idempotentReplay) {
+        this.metrics.increment('wager_duplicates_total');
+      } else {
+        this.metrics.increment(
+          `wager_transactions_${result.status.toLowerCase()}_total`,
+        );
+      }
+
+      const formattedResult = {
+        transactionId: result.transactionId,
+        status: result.status,
+        balance: {
+          amount: result.balance,
+          currency: payload.currency,
+        },
+        ...(result.failureCode
+          ? { failureCode: result.failureCode }
+          : {}),
+        idempotentReplay: result.idempotentReplay,
+      };
+
       if (
         result.status ===
         WagerTransactionStatus.PendingReference
@@ -74,13 +111,12 @@ export class WagerController {
       }
 
       if (
-        result.status ===
-        WagerTransactionStatus.Rejected
+        result.status === WagerTransactionStatus.Rejected
       ) {
-        throw new UnprocessableEntityException(result);
+        throw new UnprocessableEntityException(formattedResult);
       }
 
-      return result;
+      return formattedResult;
     } catch (error) {
       if (error instanceof UnprocessableEntityException) {
         throw error;
@@ -159,21 +195,19 @@ export class WagerController {
       throw new BadRequestException('Invalid wallet ID');
     }
 
-    let amount: unknown;
-    let currency: unknown;
-
     if (
-      data.money !== null &&
-      typeof data.money === 'object' &&
-      !Array.isArray(data.money)
+      data.money === null ||
+      typeof data.money !== 'object' ||
+      Array.isArray(data.money)
     ) {
-      const money = data.money as Record<string, unknown>;
-      amount = money.amount;
-      currency = money.currency;
-    } else {
-      amount = data.amount;
-      currency = data.currency;
+      throw new BadRequestException(
+        'Invalid transaction money',
+      );
     }
+
+    const money = data.money as Record<string, unknown>;
+    const amount = money.amount;
+    const currency = money.currency;
 
     if (
       typeof currency !== 'string' ||
@@ -187,7 +221,7 @@ export class WagerController {
     if (
       typeof amount !== 'string' ||
       !/^\d+(\.\d{1,2})?$/.test(amount) ||
-      /^0+(?:\.0{1,2})?$/.test(amount)
+      /^0+(\.0{1,2})?$/.test(amount)
     ) {
       throw new BadRequestException(
         'Invalid transaction amount',

@@ -25,8 +25,7 @@ interface MoneyBody {
 
 interface CreateWalletBody {
   playerId: string;
-  initialBalance: MoneyBody | string;
-  currency?: string;
+  initialBalance: MoneyBody;
 }
 
 @Controller('wallets')
@@ -44,27 +43,18 @@ export class WalletController {
     if (
       !body ||
       typeof body.playerId !== 'string' ||
-      !body.playerId.trim()
+      !body.playerId.trim() ||
+      !body.initialBalance ||
+      typeof body.initialBalance !== 'object' ||
+      Array.isArray(body.initialBalance) ||
+      typeof body.initialBalance.amount !== 'string' ||
+      typeof body.initialBalance.currency !== 'string'
     ) {
       throw new BadRequestException('Invalid wallet request');
     }
 
-    let amount: string;
-    let currency: string;
-
-    if (typeof body.initialBalance === 'string') {
-      amount = body.initialBalance;
-      currency = body.currency ?? '';
-    } else if (
-      body.initialBalance &&
-      typeof body.initialBalance.amount === 'string' &&
-      typeof body.initialBalance.currency === 'string'
-    ) {
-      amount = body.initialBalance.amount;
-      currency = body.initialBalance.currency;
-    } else {
-      throw new BadRequestException('Invalid wallet request');
-    }
+    const amount = body.initialBalance.amount;
+    const currency = body.initialBalance.currency;
 
     if (
       !currency.trim() ||
@@ -74,11 +64,21 @@ export class WalletController {
     }
 
     try {
-      return await this.createWallet.execute({
+      const result = await this.createWallet.execute({
         playerId: body.playerId,
         currency,
         initialBalance: amount,
       });
+
+      return {
+        id: result.walletId,
+        playerId: result.playerId,
+        balance: {
+          amount: result.balance,
+          currency: result.currency,
+        },
+        version: result.version,
+      };
     } catch (error) {
       if (
         error instanceof Error &&
@@ -169,7 +169,15 @@ export class WalletController {
       throw new NotFoundException('Wallet not found');
     }
 
-    return wallet;
+    return {
+      id: wallet.walletId,
+      playerId: wallet.playerId,
+      balance: {
+        amount: wallet.balance,
+        currency: wallet.currency,
+      },
+      version: wallet.version,
+    };
   }
 
   private validateWalletId(walletId: string): void {

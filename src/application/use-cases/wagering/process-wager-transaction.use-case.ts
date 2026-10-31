@@ -1,4 +1,6 @@
 import type { EntityManager } from '@mikro-orm/postgresql';
+import { randomUUID } from 'node:crypto';
+
 import { Money } from '../../../domain/value-objects/money.js';
 import { Wallet } from '../../../domain/entities/wallet.js';
 import {
@@ -17,6 +19,7 @@ import {
   WagerTransactionPendingReference,
   WalletBalanceChanged,
 } from '../../../domain/events/wager-events.js';
+
 import { WalletRepository } from '../../../infrastructure/persistence/repository/wallet.repository.js';
 import { WagerTransactionRepository } from '../../../infrastructure/persistence/repository/wager-transaction.repository.js';
 import { WalletLedgerEntryRepository } from '../../../infrastructure/persistence/repository/wallet-ledger-entry.repository.js';
@@ -381,7 +384,7 @@ export class ProcessWagerTransactionUseCase {
 
     if (direction !== undefined) {
       const entry = WalletLedgerEntry.create({
-        id: crypto.randomUUID(),
+        id: randomUUID(),
         walletId: wallet.id,
         transactionId: transaction.id,
         direction,
@@ -394,7 +397,7 @@ export class ProcessWagerTransactionUseCase {
     }
 
     const processedEvent = new WagerTransactionProcessed({
-      eventId: crypto.randomUUID(),
+      eventId: randomUUID(),
       aggregateId: transaction.id,
       correlationId,
       data: {
@@ -409,14 +412,17 @@ export class ProcessWagerTransactionUseCase {
 
     if (direction !== undefined) {
       const balanceEvent = new WalletBalanceChanged({
-        eventId: crypto.randomUUID(),
+        eventId: randomUUID(),
         aggregateId: wallet.id,
         correlationId,
         data: {
           transactionId: transaction.id,
           walletId: wallet.id,
+          direction,
+          money: transaction.money.toJSON(),
           balanceBefore: before.toJSON(),
           balanceAfter: wallet.balance.toJSON(),
+          walletVersion: wallet.version,
         },
       });
 
@@ -435,7 +441,7 @@ export class ProcessWagerTransactionUseCase {
     await repos.transactions.save(transaction, wallet.balance);
 
     const event = new WagerTransactionPendingReference({
-      eventId: crypto.randomUUID(),
+      eventId: randomUUID(),
       aggregateId: transaction.id,
       correlationId,
       data: {
@@ -460,7 +466,7 @@ export class ProcessWagerTransactionUseCase {
     await repos.transactions.save(transaction, wallet.balance);
 
     const event = new WagerTransactionRejected({
-      eventId: crypto.randomUUID(),
+      eventId: randomUUID(),
       aggregateId: transaction.id,
       correlationId,
       data: {

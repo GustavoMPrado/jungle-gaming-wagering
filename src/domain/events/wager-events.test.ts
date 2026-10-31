@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { LedgerDirection } from '../entities/wallet-ledger-entry.js';
 import {
   WagerTransactionProcessed,
   WagerTransactionRejected,
@@ -74,6 +75,11 @@ describe('Wager events', () => {
       data: {
         transactionId: 'transaction-1',
         walletId: 'wallet-1',
+        direction: LedgerDirection.Debit,
+        money: {
+          amount: '25.00',
+          currency: 'BRL',
+        },
         balanceBefore: {
           amount: '100.00',
           currency: 'BRL',
@@ -82,13 +88,17 @@ describe('Wager events', () => {
           amount: '75.00',
           currency: 'BRL',
         },
+        walletVersion: 2,
       },
     });
 
     expect(event.eventType).toBe('WalletBalanceChanged');
     expect(event.aggregateId).toBe('wallet-1');
+    expect(event.data.direction).toBe(LedgerDirection.Debit);
+    expect(event.data.money.amount).toBe('25.00');
     expect(event.data.balanceBefore.amount).toBe('100.00');
     expect(event.data.balanceAfter.amount).toBe('75.00');
+    expect(event.data.walletVersion).toBe(2);
   });
 
   it('should create a pending reference event', () => {
@@ -117,6 +127,11 @@ describe('Wager events', () => {
       data: {
         transactionId: 'transaction-1',
         walletId: 'wallet-1',
+        direction: LedgerDirection.Credit,
+        money: {
+          amount: '25.00',
+          currency: 'BRL',
+        },
         balanceBefore: {
           amount: '100.00',
           currency: 'BRL',
@@ -125,20 +140,26 @@ describe('Wager events', () => {
           amount: '125.00',
           currency: 'BRL',
         },
+        walletVersion: 2,
       },
     });
 
     const serialized = JSON.stringify(event);
     const parsed = JSON.parse(serialized) as {
       data: {
+        money: { amount: string };
         balanceBefore: { amount: string };
         balanceAfter: { amount: string };
+        walletVersion: number;
       };
     };
 
+    expect(parsed.data.money.amount).toBe('25.00');
     expect(parsed.data.balanceBefore.amount).toBe('100.00');
     expect(parsed.data.balanceAfter.amount).toBe('125.00');
+    expect(typeof parsed.data.money.amount).toBe('string');
     expect(typeof parsed.data.balanceAfter.amount).toBe('string');
+    expect(parsed.data.walletVersion).toBe(2);
   });
 
   it('should preserve the event identifier in its envelope', () => {

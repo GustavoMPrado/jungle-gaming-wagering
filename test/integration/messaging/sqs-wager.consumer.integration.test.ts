@@ -7,10 +7,13 @@ import {
 } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import {
+  CreateQueueCommand,
   DeleteMessageCommand,
+  DeleteQueueCommand,
   GetQueueAttributesCommand,
   ReceiveMessageCommand,
   SendMessageCommand,
+  SetQueueAttributesCommand,
   SQSClient,
 } from '@aws-sdk/client-sqs';
 import { MikroORM } from '@mikro-orm/postgresql';
@@ -28,11 +31,8 @@ describe('SQS wager consumer integration', () => {
   let sqs: SQSClient;
   let consumer: SqsWagerConsumer;
 
-  const queueUrl =
-    'http://localhost:4566/000000000000/wager-transactions.fifo';
-
-  const dlqUrl =
-    'http://localhost:4566/000000000000/wager-transactions-dlq.fifo';
+  let queueUrl: string;
+  let dlqUrl: string;
 
   beforeAll(async () => {
     orm = await MikroORM.init(ormConfig);
@@ -46,20 +46,104 @@ describe('SQS wager consumer integration', () => {
       },
     });
 
+    const suffix = randomUUID().replace(/-/g, '').slice(0, 16);
+
+    const queueName = `jg-wager-test-${suffix}.fifo`;
+    const dlqName = `jg-wager-test-${suffix}-dlq.fifo`;
+
+    const createdDlq = await sqs.send(
+      new CreateQueueCommand({
+        QueueName: dlqName,
+        Attributes: {
+          FifoQueue: 'true',
+          ContentBasedDeduplication: 'false',
+        },
+      }),
+    );
+
+    if (!createdDlq.QueueUrl) {
+      throw new Error('Unable to create test DLQ');
+    }
+
+    dlqUrl = createdDlq.QueueUrl;
+
+    const dlqAttributes = await sqs.send(
+      new GetQueueAttributesCommand({
+        QueueUrl: dlqUrl,
+        AttributeNames: ['QueueArn'],
+      }),
+    );
+
+    const dlqArn = dlqAttributes.Attributes?.QueueArn;
+
+    if (!dlqArn) {
+      throw new Error('Unable to retrieve test DLQ ARN');
+    }
+
+    const createdQueue = await sqs.send(
+      new CreateQueueCommand({
+        QueueName: queueName,
+        Attributes: {
+          FifoQueue: 'true',
+          ContentBasedDeduplication: 'false',
+        },
+      }),
+    );
+
+    if (!createdQueue.QueueUrl) {
+      throw new Error('Unable to create test SQS queue');
+    }
+
+    queueUrl = createdQueue.QueueUrl;
+
+    await sqs.send(
+      new SetQueueAttributesCommand({
+        QueueUrl: queueUrl,
+        Attributes: {
+          RedrivePolicy: JSON.stringify({
+            deadLetterTargetArn: dlqArn,
+            maxReceiveCount: 5,
+          }),
+        },
+      }),
+    );
+
     consumer = new SqsWagerConsumer(orm, sqs, queueUrl);
   });
 
   afterAll(async () => {
-    if (consumer) {
-      await consumer.onModuleDestroy();
-    }
+    try {
+      if (consumer) {
+        await consumer.onModuleDestroy();
+      }
+    } finally {
+      try {
+        if (sqs && queueUrl) {
+          await sqs.send(
+            new DeleteQueueCommand({
+              QueueUrl: queueUrl,
+            }),
+          );
+        }
+      } finally {
+        try {
+          if (sqs && dlqUrl) {
+            await sqs.send(
+              new DeleteQueueCommand({
+                QueueUrl: dlqUrl,
+              }),
+            );
+          }
+        } finally {
+          if (sqs) {
+            sqs.destroy();
+          }
 
-    if (sqs) {
-      sqs.destroy();
-    }
-
-    if (orm) {
-      await orm.close();
+          if (orm) {
+            await orm.close();
+          }
+        }
+      }
     }
   });
 
@@ -198,7 +282,7 @@ describe('SQS wager consumer integration', () => {
     ).findById('wagering-consumer', messageId);
 
     expect(inbox?.isProcessed()).toBe(true);
-  });
+  }, 45000);
 
   it('should not credit the wallet twice on SQS redelivery', async () => {
     const messageId = randomUUID();
@@ -294,7 +378,7 @@ describe('SQS wager consumer integration', () => {
     expect(Number(transactions[0]?.count)).toBe(1);
     expect(Number(inboxRecords[0]?.count)).toBe(1);
     expect(Number(ledgerRecords[0]?.count)).toBe(1);
-  });
+  }, 45000);
 
   it('should retry after rollback and process when the wallet becomes available', async () => {
     const messageId = randomUUID();
@@ -380,7 +464,7 @@ describe('SQS wager consumer integration', () => {
     expect(inboxAfter?.isProcessed()).toBe(true);
     expect(Number(ledger[0]?.count)).toBe(1);
     expect(Number(transactionsAfter[0]?.count)).toBe(1);
-  }, 30000);
+  }, 45000);
 
   it('should move an invalid message to the DLQ after five receives', async () => {
     const messageId = randomUUID();

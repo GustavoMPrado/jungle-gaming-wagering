@@ -16,6 +16,9 @@ import {
 import {
   OutboxMessageRepository,
 } from '../persistence/repository/outbox-message.repository.js';
+import {
+  MetricsService,
+} from '../observability/metrics.service.js';
 
 export class SqsOutboxPublisher implements OnModuleInit, OnModuleDestroy {
   private running = false;
@@ -25,6 +28,7 @@ export class SqsOutboxPublisher implements OnModuleInit, OnModuleDestroy {
     private readonly orm: MikroORM,
     private readonly sqs: SQSClient,
     private readonly queueUrl: string,
+    private readonly metrics?: MetricsService,
   ) {}
 
   public onModuleInit(): void {
@@ -104,11 +108,34 @@ export class SqsOutboxPublisher implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      this.log('outbox_event_published', {
-        eventId: message.id,
-        eventType: message.eventType,
-        aggregateId: message.aggregateId,
-      });
+      this.metrics?.increment('outbox_published_total');
+
+      const createdAt = this.getEventCreatedAt(message);
+
+      if (createdAt !== undefined) {
+        const lagMs = Math.max(
+          0,
+          Date.now() - createdAt,
+        );
+
+        this.metrics?.observeDuration(
+          'outbox_lag_ms',
+          lagMs,
+        );
+
+        this.log('outbox_event_published', {
+          eventId: message.id,
+          eventType: message.eventType,
+          aggregateId: message.aggregateId,
+          lagMs: Math.round(lagMs),
+        });
+      } else {
+        this.log('outbox_event_published', {
+          eventId: message.id,
+          eventType: message.eventType,
+          aggregateId: message.aggregateId,
+        });
+      }
     } catch (error) {
       this.log('outbox_publish_error', {
         eventId: message.id,
@@ -119,6 +146,52 @@ export class SqsOutboxPublisher implements OnModuleInit, OnModuleDestroy {
 
       await this.scheduleRetry(message, token);
     }
+  }
+
+  private getEventCreatedAt(
+    message: OutboxMessage,
+  ): number | undefined {
+    const record = message as unknown as Record<string, unknown>;
+
+    const createdAt = record.createdAt;
+
+    if (createdAt instanceof Date) {
+      const timestamp = createdAt.getTime();
+
+      return Number.isFinite(timestamp)
+        ? timestamp
+        : undefined;
+    }
+
+    if (typeof createdAt === 'string') {
+      const timestamp = Date.parse(createdAt);
+
+      return Number.isFinite(timestamp)
+        ? timestamp
+        : undefined;
+    }
+
+    const payload = message.payload;
+
+    if (
+      payload !== null &&
+      typeof payload === 'object' &&
+      !Array.isArray(payload)
+    ) {
+      const occurredAt = (
+        payload as Record<string, unknown>
+      ).occurredAt;
+
+      if (typeof occurredAt === 'string') {
+        const timestamp = Date.parse(occurredAt);
+
+        return Number.isFinite(timestamp)
+          ? timestamp
+          : undefined;
+      }
+    }
+
+    return undefined;
   }
 
   private async scheduleRetry(
@@ -153,6 +226,8 @@ export class SqsOutboxPublisher implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
+      this.metrics?.increment('outbox_retries_total');
+
       this.log('outbox_retry_scheduled', {
         eventId: message.id,
         delaySeconds,
@@ -176,7 +251,16 @@ export class SqsOutboxPublisher implements OnModuleInit, OnModuleDestroy {
     event: string,
     details: Record<string, unknown>,
   ): void {
+    const level =
+      event.includes('error')
+        ? 'error'
+        : event.includes('retry') || event.includes('claim_lost')
+          ? 'warn'
+          : 'info';
+
     console.log(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level,
       event,
       publisher: 'sqs-outbox-publisher',
       ...details,

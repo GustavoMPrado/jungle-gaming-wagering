@@ -116,8 +116,11 @@ export class CreateWalletUseCase {
           data: {
             transactionId: transaction.id,
             walletId: wallet.id,
+            direction: LedgerDirection.Credit,
+            money: initialBalance.toJSON(),
             balanceBefore: balanceBefore.toJSON(),
             balanceAfter: wallet.balance.toJSON(),
+            walletVersion: wallet.version,
           },
         });
 

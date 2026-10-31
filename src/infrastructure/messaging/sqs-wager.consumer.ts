@@ -29,6 +29,9 @@ import {
   createWagerPayloadHash,
   type WagerPayload,
 } from '../../application/utils/wager-payload-hash.js';
+import {
+  MetricsService,
+} from '../observability/metrics.service.js';
 
 interface WagerQueueMessage {
   messageId: string;
@@ -54,6 +57,7 @@ export class SqsWagerConsumer implements OnModuleInit, OnModuleDestroy {
     private readonly orm: MikroORM,
     private readonly sqs: SQSClient,
     private readonly queueUrl: string,
+    private readonly metrics?: MetricsService,
   ) {}
 
   public onModuleInit(): void {
@@ -104,6 +108,8 @@ export class SqsWagerConsumer implements OnModuleInit, OnModuleDestroy {
   }
 
   private async processMessage(message: Message): Promise<void> {
+    const startedAt = performance.now();
+
     const receiveCount = Number(
       message.Attributes?.ApproximateReceiveCount ?? '1',
     );
@@ -139,6 +145,7 @@ export class SqsWagerConsumer implements OnModuleInit, OnModuleDestroy {
           if (claimed.isProcessed()) {
             return {
               duplicate: true,
+              idempotentReplay: false,
               status: 'ALREADY_PROCESSED',
               transactionId: undefined as string | undefined,
             };
@@ -162,11 +169,29 @@ export class SqsWagerConsumer implements OnModuleInit, OnModuleDestroy {
 
           return {
             duplicate: false,
+            idempotentReplay: processed.idempotentReplay,
             status: processed.status,
             transactionId: processed.transactionId,
           };
         },
       );
+
+      const durationMs = performance.now() - startedAt;
+
+      this.metrics?.observeDuration(
+        'wager_processing_duration_ms',
+        durationMs,
+      );
+
+      if (result.duplicate || result.idempotentReplay) {
+        this.metrics?.increment('wager_duplicates_total');
+      }
+
+      if (!result.duplicate && !result.idempotentReplay) {
+        this.metrics?.increment(
+          `wager_transactions_${result.status.toLowerCase()}_total`,
+        );
+      }
 
       this.log('transaction_committed', {
         messageId,
@@ -175,7 +200,8 @@ export class SqsWagerConsumer implements OnModuleInit, OnModuleDestroy {
         providerId: payload.providerId,
         correlationId: messageId,
         status: result.status,
-        duplicate: result.duplicate,
+        duplicate: result.duplicate || result.idempotentReplay,
+        durationMs: Math.round(durationMs),
       });
 
       await this.acknowledge(message);
@@ -186,6 +212,10 @@ export class SqsWagerConsumer implements OnModuleInit, OnModuleDestroy {
       });
     } catch (error) {
       const permanent = this.isPermanentError(error);
+
+      if (this.isLockConflict(error)) {
+        this.metrics?.increment('wager_lock_conflicts_total');
+      }
 
       this.log(
         permanent
@@ -226,6 +256,37 @@ export class SqsWagerConsumer implements OnModuleInit, OnModuleDestroy {
     return permanentErrors.includes(error.message);
   }
 
+  private isLockConflict(error: unknown): boolean {
+    let current: unknown = error;
+
+    for (let depth = 0; depth < 5; depth++) {
+      if (
+        current === null ||
+        typeof current !== 'object'
+      ) {
+        return false;
+      }
+
+      const details = current as {
+        code?: unknown;
+        cause?: unknown;
+        driverException?: unknown;
+      };
+
+      if (
+        details.code === '55P03' ||
+        details.code === '40P01'
+      ) {
+        return true;
+      }
+
+      current =
+        details.driverException ?? details.cause;
+    }
+
+    return false;
+  }
+
   private async scheduleRetry(
     message: Message,
     receiveCount: number,
@@ -247,6 +308,8 @@ export class SqsWagerConsumer implements OnModuleInit, OnModuleDestroy {
           VisibilityTimeout: delaySeconds,
         }),
       );
+
+      this.metrics?.increment('sqs_retries_total');
 
       this.log('message_retry_scheduled', {
         messageId: message.MessageId,
@@ -333,7 +396,11 @@ export class SqsWagerConsumer implements OnModuleInit, OnModuleDestroy {
       WagerTransactionKind.Rollback,
     ];
 
-    if (!allowedKinds.includes(data.kind as WagerTransactionKind)) {
+    if (
+      !allowedKinds.includes(
+        data.kind as WagerTransactionKind,
+      )
+    ) {
       throw new InvalidSqsMessageError(
         'Invalid transaction kind',
       );
@@ -451,7 +518,16 @@ export class SqsWagerConsumer implements OnModuleInit, OnModuleDestroy {
     event: string,
     details: Record<string, unknown>,
   ): void {
+    const level =
+      event.includes('error') || event.includes('failed')
+        ? 'error'
+        : event.includes('retry')
+          ? 'warn'
+          : 'info';
+
     console.log(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level,
       event,
       consumer: this.consumerName,
       ...details,
