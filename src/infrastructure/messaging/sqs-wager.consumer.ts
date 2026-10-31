@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 import {
   ChangeMessageVisibilityCommand,
@@ -97,7 +98,7 @@ export class SqsWagerConsumer implements OnModuleInit, OnModuleDestroy {
           error: this.errorMessage(error),
         });
 
-        await Bun.sleep(1000);
+        await sleep(1000);
       }
     }
   }

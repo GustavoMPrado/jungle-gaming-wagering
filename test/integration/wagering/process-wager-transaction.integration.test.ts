@@ -6,6 +6,7 @@ import {
   it,
 } from 'bun:test';
 import { MikroORM } from '@mikro-orm/postgresql';
+
 import ormConfig from '../../../src/mikro-orm.config.js';
 import { Wallet } from '../../../src/domain/entities/wallet.js';
 import { Money } from '../../../src/domain/value-objects/money.js';
@@ -308,4 +309,209 @@ describe('ProcessWagerTransaction integration', () => {
 
     expect(entries.length).toBe(2);
   });
+
+  it('should rollback a processed BET', async () => {
+    const { walletId, playerId } = await createWallet();
+    const useCase = new ProcessWagerTransactionUseCase(orm.em);
+
+    await useCase.execute(
+      createInput(
+        walletId,
+        playerId,
+        WagerTransactionKind.Win,
+        '100.00',
+      ),
+    );
+
+    const betInput = createInput(
+      walletId,
+      playerId,
+      WagerTransactionKind.Bet,
+      '30.00',
+    );
+
+    await useCase.execute(betInput);
+
+    const rollbackInput = {
+      ...createInput(
+        walletId,
+        playerId,
+        WagerTransactionKind.Rollback,
+        '30.00',
+      ),
+      referenceExternalTransactionId:
+        betInput.externalTransactionId,
+    };
+
+    const result = await useCase.execute(rollbackInput);
+
+    expect(result.status).toBe(WagerTransactionStatus.Processed);
+    expect(result.balance).toBe('100.00');
+
+    const entries = await new WalletLedgerEntryRepository(
+      orm.em.fork(),
+    ).findByWalletId(walletId);
+
+    expect(entries.length).toBe(3);
+    expect(entries.every((entry) => entry.isBalanced())).toBe(true);
+
+    const rollback = await new WagerTransactionRepository(
+      orm.em.fork(),
+    ).findById(rollbackInput.transactionId);
+
+    expect(rollback?.referenceTransactionId).toBe(
+      betInput.transactionId,
+    );
+  });
+
+  it('should rollback a processed REFUND', async () => {
+    const { walletId, playerId } = await createWallet();
+    const useCase = new ProcessWagerTransactionUseCase(orm.em);
+
+    await useCase.execute(
+      createInput(
+        walletId,
+        playerId,
+        WagerTransactionKind.Win,
+        '100.00',
+      ),
+    );
+
+    const betInput = createInput(
+      walletId,
+      playerId,
+      WagerTransactionKind.Bet,
+      '30.00',
+    );
+
+    await useCase.execute(betInput);
+
+    const refundInput = {
+      ...createInput(
+        walletId,
+        playerId,
+        WagerTransactionKind.Refund,
+        '30.00',
+      ),
+      referenceExternalTransactionId:
+        betInput.externalTransactionId,
+    };
+
+    await useCase.execute(refundInput);
+
+    const rollbackInput = {
+      ...createInput(
+        walletId,
+        playerId,
+        WagerTransactionKind.Rollback,
+        '30.00',
+      ),
+      referenceExternalTransactionId:
+        refundInput.externalTransactionId,
+    };
+
+    const result = await useCase.execute(rollbackInput);
+
+    expect(result.status).toBe(WagerTransactionStatus.Processed);
+    expect(result.balance).toBe('70.00');
+
+    const entries = await new WalletLedgerEntryRepository(
+      orm.em.fork(),
+    ).findByWalletId(walletId);
+
+    expect(entries.length).toBe(4);
+    expect(entries.every((entry) => entry.isBalanced())).toBe(true);
+
+    const rollback = await new WagerTransactionRepository(
+      orm.em.fork(),
+    ).findById(rollbackInput.transactionId);
+
+    expect(rollback?.referenceTransactionId).toBe(
+      refundInput.transactionId,
+    );
+  });
+
+  it('should reject REFUND referencing a WIN', async () => {
+    const { walletId, playerId } = await createWallet();
+    const useCase = new ProcessWagerTransactionUseCase(orm.em);
+
+    const winInput = createInput(
+      walletId,
+      playerId,
+      WagerTransactionKind.Win,
+      '100.00',
+    );
+
+    await useCase.execute(winInput);
+
+    const refundInput = {
+      ...createInput(
+        walletId,
+        playerId,
+        WagerTransactionKind.Refund,
+        '100.00',
+      ),
+      referenceExternalTransactionId:
+        winInput.externalTransactionId,
+    };
+
+    const result = await useCase.execute(refundInput);
+
+    expect(result.status).toBe(WagerTransactionStatus.Rejected);
+    expect(result.failureCode).toBe('INVALID_REFERENCE_TYPE');
+    expect(result.balance).toBe('100.00');
+
+    const ledger = await new WalletLedgerEntryRepository(
+      orm.em.fork(),
+    ).findByTransactionId(refundInput.transactionId);
+
+    expect(ledger).toBeNull();
+  });
+
+  it('should reject reversal with mismatched amount', async () => {
+    const { walletId, playerId } = await createWallet();
+    const useCase = new ProcessWagerTransactionUseCase(orm.em);
+
+    await useCase.execute(
+      createInput(
+        walletId,
+        playerId,
+        WagerTransactionKind.Win,
+        '100.00',
+      ),
+    );
+
+    const betInput = createInput(
+      walletId,
+      playerId,
+      WagerTransactionKind.Bet,
+      '30.00',
+    );
+
+    await useCase.execute(betInput);
+
+    const refundInput = {
+      ...createInput(
+        walletId,
+        playerId,
+        WagerTransactionKind.Refund,
+        '20.00',
+      ),
+      referenceExternalTransactionId:
+        betInput.externalTransactionId,
+    };
+
+    const result = await useCase.execute(refundInput);
+
+    expect(result.status).toBe(WagerTransactionStatus.Rejected);
+    expect(result.failureCode).toBe('INVALID_REFERENCE');
+    expect(result.balance).toBe('70.00');
+
+    const ledger = await new WalletLedgerEntryRepository(
+      orm.em.fork(),
+    ).findByTransactionId(refundInput.transactionId);
+
+    expect(ledger).toBeNull();
+  });
 });
+
