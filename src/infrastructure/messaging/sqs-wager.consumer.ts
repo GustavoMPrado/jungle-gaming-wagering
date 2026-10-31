@@ -204,7 +204,6 @@ export class SqsWagerConsumer implements OnModuleInit, OnModuleDestroy {
       if (!permanent && this.running) {
         await this.scheduleRetry(message, receiveCount);
       }
-
     }
   }
 
@@ -317,9 +316,7 @@ export class SqsWagerConsumer implements OnModuleInit, OnModuleDestroy {
     }
 
     if (!this.isObject(envelope.data)) {
-      throw new InvalidSqsMessageError(
-        'Invalid SQS message data',
-      );
+      throw new InvalidSqsMessageError('Invalid money object');
     }
 
     const data = envelope.data;
@@ -461,4 +458,3 @@ export class SqsWagerConsumer implements OnModuleInit, OnModuleDestroy {
     }));
   }
 }
-
